@@ -1,0 +1,787 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>配置管理 · Douyin Downloader</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f5f5f7;
+        --card-bg: #ffffff;
+        --text-main: #1d1d1f;
+        --text-sub: #6e6e73;
+        --accent: #0071e3;
+        --border: #d2d2d7;
+        --radius-lg: 18px;
+        --radius-md: 12px;
+        --shadow-soft: 0 18px 40px rgba(0, 0, 0, 0.08);
+        --transition-fast: 180ms ease-out;
+        --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          system-ui, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family: var(--font-sans);
+        background: radial-gradient(circle at top left, #ffffff, #f5f5f7 55%);
+        color: var(--text-main);
+      }
+
+      body {
+        display: flex;
+        justify-content: center;
+        align-items: stretch;
+      }
+
+      .app-shell {
+        width: 100%;
+        max-width: 1280px;
+        margin: 24px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .title-block {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .title {
+        font-size: 22px;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+      }
+
+      .subtitle {
+        font-size: 13px;
+        color: var(--text-sub);
+      }
+
+      .pill {
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(0, 0, 0, 0.06);
+        background: rgba(255, 255, 255, 0.8);
+        font-size: 12px;
+        color: var(--text-sub);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .pill-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #30d158;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.2fr);
+        gap: 24px;
+      }
+
+      @media (max-width: 960px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card {
+        background: radial-gradient(circle at top left, #ffffff, #f9f9fb 55%);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-soft);
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        padding: 16px 18px 12px;
+        backdrop-filter: blur(18px);
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .card-title {
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .card-subtitle {
+        font-size: 12px;
+        color: var(--text-sub);
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      button {
+        border: none;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 12px;
+        border-radius: 999px;
+        padding: 6px 12px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: transform var(--transition-fast),
+          box-shadow var(--transition-fast),
+          background-color var(--transition-fast);
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #0071e3, #0a84ff);
+        color: #ffffff;
+        box-shadow: 0 10px 30px rgba(0, 113, 227, 0.35);
+      }
+
+      .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 40px rgba(0, 113, 227, 0.4);
+      }
+
+      .btn-ghost {
+        background: rgba(0, 0, 0, 0.03);
+        color: var(--text-main);
+      }
+
+      .btn-ghost:hover {
+        background: rgba(0, 0, 0, 0.06);
+      }
+
+      .tag {
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(0, 0, 0, 0.06);
+        color: var(--text-sub);
+      }
+
+      .section {
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(0, 0, 0, 0.04);
+        background: rgba(255, 255, 255, 0.7);
+        overflow: hidden;
+      }
+
+      .section-header {
+        padding: 10px 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+      }
+
+      .section-body {
+        max-height: 420px;
+        overflow: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      thead {
+        position: sticky;
+        top: 0;
+        background: rgba(249, 249, 251, 0.96);
+        backdrop-filter: blur(10px);
+        z-index: 1;
+      }
+
+      th,
+      td {
+        padding: 6px 10px;
+        text-align: left;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+        vertical-align: middle;
+      }
+
+      th {
+        font-weight: 500;
+        color: var(--text-sub);
+      }
+
+      tr:hover td {
+        background: rgba(0, 113, 227, 0.03);
+      }
+
+      .text-right {
+        text-align: right;
+      }
+
+      .link-douyin {
+        font-size: 12px;
+        color: #0071e3;
+        text-decoration: none;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: rgba(0, 113, 227, 0.06);
+        transition: background-color var(--transition-fast),
+          color var(--transition-fast),
+          transform var(--transition-fast);
+      }
+
+      .link-douyin:hover {
+        background: rgba(0, 113, 227, 0.12);
+        color: #005bb5;
+        transform: translateY(-0.5px);
+      }
+
+      .badge-type {
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .badge-posts {
+        background: rgba(0, 113, 227, 0.08);
+        color: #0071e3;
+      }
+
+      .badge-likes {
+        background: rgba(52, 199, 89, 0.12);
+        color: #34c759;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1.6fr 1.4fr;
+        gap: 10px 14px;
+        padding: 10px 14px 2px;
+      }
+
+      @media (max-width: 720px) {
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      label {
+        font-size: 12px;
+        color: var(--text-sub);
+      }
+
+      input,
+      select {
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        padding: 7px 12px;
+        font-family: inherit;
+        font-size: 13px;
+        outline: none;
+        background: rgba(255, 255, 255, 0.9);
+        transition: border-color var(--transition-fast),
+          box-shadow var(--transition-fast),
+          background-color var(--transition-fast);
+      }
+
+      input:focus,
+      select:focus {
+        border-color: #0a84ff;
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.25);
+      }
+
+      .hint {
+        font-size: 11px;
+        color: var(--text-sub);
+      }
+
+      .settings-card {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .settings-row {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .settings-label {
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .settings-inline {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .settings-inline input {
+        width: 80px;
+        text-align: center;
+      }
+
+      .status-bar {
+        margin-top: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 11px;
+        color: var(--text-sub);
+      }
+
+      .status-message {
+        min-height: 18px;
+      }
+
+      .status-message.ok {
+        color: #34c759;
+      }
+
+      .status-message.err {
+        color: #ff3b30;
+      }
+
+      /* 编辑弹窗样式 */
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.3);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+      }
+
+      .modal {
+        width: 100%;
+        max-width: 420px;
+        background: #ffffff;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-soft);
+        border: 1px solid rgba(0, 0, 0, 0.06);
+        padding: 16px 18px 14px;
+      }
+
+      .modal-header {
+        margin-bottom: 10px;
+      }
+
+      .modal-title {
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .modal-body {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header>
+        <div class="title-block">
+          <div class="title">配置管理</div>
+          <div class="subtitle">实时管理监控用户与抓取参数，保存后立即生效。</div>
+        </div>
+        <div class="pill">
+          <span class="pill-dot"></span>
+          <span>配置服务独立运行 · 不影响主监控进程</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">监控用户列表</div>
+              <div class="card-subtitle">管理需要监控的抖音用户。</div>
+            </div>
+            <div class="toolbar">
+              <button class="btn-ghost" id="refresh-btn">刷新</button>
+              <button class="btn-primary" id="add-btn">添加用户</button>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="field">
+              <label for="username">用户名</label>
+              <input id="username" placeholder="用于展示的昵称" />
+            </div>
+            <div class="field">
+              <label for="monitor_type">监控类型</label>
+              <select id="monitor_type">
+                <option value="posts">作品</option>
+                <option value="likes">点赞</option>
+              </select>
+            </div>
+            <div class="field" style="grid-column: 1 / -1">
+              <label for="sec_user_id">sec_user_id</label>
+              <input
+                id="sec_user_id"
+                placeholder="从抖音用户链接中提取的 sec_user_id"
+              />
+              <div class="hint">
+                建议先在外部工具中获取 sec_user_id，再粘贴到这里。
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-header">
+              <span class="card-subtitle">共 <span id="user-count">0</span> 个用户</span>
+            </div>
+            <div class="section-body">
+              <table>
+                <thead>
+                  <tr>
+                    <th>用户名</th>
+                    <th>监控类型</th>
+                    <th>抖音主页</th>
+                    <th class="text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="user-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 编辑用户弹窗 -->
+        <div id="edit-modal-backdrop" class="modal-backdrop" style="display: none">
+          <div class="modal">
+            <div class="modal-header">
+              <div class="modal-title">编辑用户</div>
+            </div>
+            <div class="modal-body">
+              <div class="field">
+                <label for="edit_username">用户名</label>
+                <input id="edit_username" />
+              </div>
+              <div class="field">
+                <label for="edit_monitor_type">监控类型</label>
+                <select id="edit_monitor_type">
+                  <option value="posts">作品</option>
+                  <option value="likes">点赞</option>
+                </select>
+              </div>
+              <div class="field" style="display: none">
+                <label>sec_user_id</label>
+                <div id="edit_sec_user_id" class="hint"></div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-ghost" id="edit-cancel-btn">取消</button>
+              <button class="btn-primary" id="edit-save-btn">保存</button>
+            </div>
+          </div>
+        </div>
+
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">全局设置</div>
+              <div class="card-subtitle">控制抓取分页参数等行为。</div>
+            </div>
+            <span class="tag">settings</span>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-row">
+              <div class="settings-label">单次抓取数量 page_size</div>
+              <div class="settings-inline">
+                <input id="page_size" type="number" min="1" step="1" />
+                <span class="hint">建议 20 左右，根据稳定性调整。</span>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-label">排序方式 sort_type</div>
+              <div class="settings-inline">
+                <input id="sort_type" type="number" min="0" step="1" />
+                <span class="hint">保持与当前后端逻辑一致，例如 0 表示时间倒序。</span>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-label">操作</div>
+              <div class="settings-inline">
+                <button class="btn-primary" id="save-settings-btn">
+                  保存设置
+                </button>
+                <button class="btn-ghost" id="reset-settings-btn">
+                  重置为文件值
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="status-bar">
+            <div class="status-message" id="status-message"></div>
+            <div id="api-base-hint" class="hint"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const apiBase =
+        window.CONFIG_API_BASE || window.location.origin.replace(/\/$/, '');
+
+      const els = {
+        userTableBody: document.getElementById('user-table-body'),
+        userCount: document.getElementById('user-count'),
+        username: document.getElementById('username'),
+        monitorType: document.getElementById('monitor_type'),
+        secUserId: document.getElementById('sec_user_id'),
+        refreshBtn: document.getElementById('refresh-btn'),
+        addBtn: document.getElementById('add-btn'),
+        pageSize: document.getElementById('page_size'),
+        sortType: document.getElementById('sort_type'),
+        saveSettingsBtn: document.getElementById('save-settings-btn'),
+        resetSettingsBtn: document.getElementById('reset-settings-btn'),
+        statusMessage: document.getElementById('status-message'),
+        apiBaseHint: document.getElementById('api-base-hint'),
+        editModalBackdrop: document.getElementById('edit-modal-backdrop'),
+        editUsername: document.getElementById('edit_username'),
+        editMonitorType: document.getElementById('edit_monitor_type'),
+        editSecUserId: document.getElementById('edit_sec_user_id'),
+        editSaveBtn: document.getElementById('edit-save-btn'),
+        editCancelBtn: document.getElementById('edit-cancel-btn'),
+      };
+
+      els.apiBaseHint.textContent = `API: ${apiBase}`;
+
+      function setStatus(message, type) {
+        els.statusMessage.textContent = message || '';
+        els.statusMessage.className = 'status-message';
+        if (type) {
+          els.statusMessage.classList.add(type);
+        }
+      }
+
+      async function api(path, options) {
+        const res = await fetch(apiBase + path, {
+          headers: { 'Content-Type': 'application/json' },
+          ...options,
+        });
+        if (res.status === 204) return null;
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          const msg = (data && data.message) || `请求失败 (${res.status})`;
+          throw new Error(msg);
+        }
+        return data;
+      }
+
+      function renderUsers(users) {
+        els.userTableBody.innerHTML = '';
+        users.forEach((user) => {
+          const tr = document.createElement('tr');
+
+          const typeClass =
+            user.monitor_type === 'likes' ? 'badge-likes' : 'badge-posts';
+          const typeLabel =
+            user.monitor_type === 'likes' ? '点赞' : '作品';
+
+          const profileUrl = `https://www.douyin.com/user/${encodeURIComponent(
+            user.sec_user_id || '',
+          )}`;
+
+          tr.innerHTML = `
+            <td>${user.username || '-'}</td>
+            <td>
+              <span class="badge-type ${typeClass}">${typeLabel}</span>
+            </td>
+            <td>
+              <a class="link-douyin" href="${profileUrl}" target="_blank" rel="noreferrer">
+                访问主页
+              </a>
+            </td>
+            <td class="text-right">
+              <button class="btn-ghost btn-sm" data-action="edit">编辑</button>
+              <button class="btn-ghost btn-sm" data-action="delete">删除</button>
+            </td>
+          `;
+
+          tr.querySelector('[data-action="edit"]').onclick = () => {
+            els.editUsername.value = user.username || '';
+            els.editMonitorType.value = user.monitor_type || 'posts';
+            els.editSecUserId.textContent = user.sec_user_id || '';
+            els.editModalBackdrop.dataset.secUserId = user.sec_user_id || '';
+            els.editModalBackdrop.style.display = 'flex';
+          };
+
+          tr.querySelector('[data-action="delete"]').onclick = async () => {
+            if (
+              !confirm(
+                `确认从监控列表中移除「${user.username}」？此操作不会删除已下载数据。`,
+              )
+            )
+              return;
+            try {
+              await api(`/api/users/${encodeURIComponent(user.sec_user_id)}`, {
+                method: 'DELETE',
+              });
+              loadUsers();
+              setStatus('已删除用户', 'ok');
+            } catch (e) {
+              setStatus(e.message, 'err');
+            }
+          };
+
+          els.userTableBody.appendChild(tr);
+        });
+        els.userCount.textContent = users.length;
+      }
+
+      async function loadUsers() {
+        try {
+          const users = await api('/api/users');
+          renderUsers(users || []);
+        } catch (e) {
+          setStatus(e.message, 'err');
+        }
+      }
+
+      async function loadSettings() {
+        try {
+          const settings = await api('/api/settings');
+          els.pageSize.value = settings.page_size ?? '';
+          els.sortType.value = settings.sort_type ?? '';
+        } catch (e) {
+          setStatus(e.message, 'err');
+        }
+      }
+
+      els.refreshBtn.onclick = () => {
+        loadUsers();
+        loadSettings();
+        setStatus('已从文件重新加载配置', 'ok');
+      };
+
+      els.addBtn.onclick = async () => {
+        const sec_user_id = els.secUserId.value.trim();
+        const username = els.username.value.trim();
+        const monitor_type = els.monitorType.value;
+
+        if (!sec_user_id || !username) {
+          setStatus('请填写用户名与 sec_user_id', 'err');
+          return;
+        }
+
+        try {
+          await api('/api/users', {
+            method: 'POST',
+            body: JSON.stringify({ sec_user_id, username, monitor_type }),
+          });
+          setStatus('已添加用户', 'ok');
+
+          els.username.value = '';
+          els.monitorType.value = 'posts';
+          els.secUserId.value = '';
+
+          loadUsers();
+        } catch (e) {
+          setStatus(e.message, 'err');
+        }
+      };
+
+      // 编辑弹窗交互逻辑
+      els.editCancelBtn.onclick = () => {
+        els.editModalBackdrop.style.display = 'none';
+        delete els.editModalBackdrop.dataset.secUserId;
+      };
+
+      els.editSaveBtn.onclick = async () => {
+        const username = els.editUsername.value.trim();
+        const monitor_type = els.editMonitorType.value;
+        const sec_user_id = (els.editModalBackdrop.dataset.secUserId || '').trim();
+
+        if (!sec_user_id) {
+          setStatus('缺少 sec_user_id，无法更新用户', 'err');
+          return;
+        }
+        if (!username) {
+          setStatus('请填写用户名', 'err');
+          return;
+        }
+
+        try {
+          await api(`/api/users/${encodeURIComponent(sec_user_id)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ username, monitor_type }),
+          });
+          setStatus('已更新用户信息', 'ok');
+          els.editModalBackdrop.style.display = 'none';
+          delete els.editModalBackdrop.dataset.secUserId;
+          loadUsers();
+        } catch (e) {
+          setStatus(e.message, 'err');
+        }
+      };
+
+      els.saveSettingsBtn.onclick = async () => {
+        const page_size = parseInt(els.pageSize.value, 10);
+        const sort_type = parseInt(els.sortType.value, 10);
+        try {
+          await api('/api/settings', {
+            method: 'PUT',
+            body: JSON.stringify({
+              page_size: isNaN(page_size) ? undefined : page_size,
+              sort_type: isNaN(sort_type) ? undefined : sort_type,
+            }),
+          });
+          setStatus('设置已保存', 'ok');
+        } catch (e) {
+          setStatus(e.message, 'err');
+        }
+      };
+
+      els.resetSettingsBtn.onclick = () => {
+        loadSettings();
+        setStatus('已重置为文件中的设置值', 'ok');
+      };
+
+      (function init() {
+        loadUsers();
+        loadSettings();
+      })();
+    </script>
+  </body>
+</html>
+
+

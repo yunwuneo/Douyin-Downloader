@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "config-api": "node config-api.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
@@ -12,7 +13,9 @@
     "node-schedule": "^2.1.1",
     "dotenv": "^16.0.3",
     "fs-extra": "^11.1.1",
-    "sqlite3": "^5.1.6"
+    "sqlite3": "^5.1.6",
+    "express": "^4.21.1",
+    "cors": "^2.8.5"
   },
   "devDependencies": {},
   "keywords": ["douyin", "downloader", "automation"],
