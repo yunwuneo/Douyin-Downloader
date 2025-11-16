@@ -15,7 +15,11 @@
     "fs-extra": "^11.1.1",
     "sqlite3": "^5.1.6",
     "express": "^4.21.1",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "dropbox": "^10.34.0",
+    "@aws-sdk/client-s3": "^3.645.0",
+    "node-fetch": "^2.7.0",
+    "https-proxy-agent": "^5.0.1"
   },
   "devDependencies": {},
   "keywords": ["douyin", "downloader", "automation"],

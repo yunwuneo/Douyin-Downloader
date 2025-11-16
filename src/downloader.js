@@ -3,6 +3,7 @@ const path = require('path');
 const axios = require('axios');
 const { ensureDirectory, getFileExtension, saveJSON } = require('./utils');
 const db = require('./db');
+const storage = require('./storage');
 require('dotenv').config();
 
 /**
@@ -69,12 +70,18 @@ class Downloader {
       });
 
       const writer = fs.createWriteStream(filePath);
-      
+
       response.data.pipe(writer);
-      
+
       return new Promise((resolve, reject) => {
-        writer.on('finish', () => {
+        writer.on('finish', async () => {
           console.log(`下载完成: ${filePath}`);
+          try {
+            const relativePath = path.relative(this.downloadDir, filePath);
+            await storage.syncFile(filePath, relativePath);
+          } catch (syncError) {
+            console.error(`同步到其他存储后端失败 (${filePath}): ${syncError.message}`);
+          }
           resolve(true);
         });
         writer.on('error', (error) => {

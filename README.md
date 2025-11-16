@@ -36,14 +36,37 @@ npm start
 ## 配置说明
 
 ### 环境变量 (.env)
-- `API_KEY`: TikHub API 密钥
-- `API_BASE_URL`: API基础URL
-- `DOWNLOAD_DIR`: 下载文件保存目录
-- `DOWNLOAD_VIDEO`: 是否下载视频
-- `DOWNLOAD_PHOTO`: 是否下载照片
-- `DOWNLOAD_CAPTION`: 是否下载文字描述
-- `MONITOR_INTERVAL`: 监控间隔（毫秒）
-- `MAX_RETRY`: 下载失败重试次数
+- `API_KEY`: TikHub API 密钥  
+- `API_BASE_URL`: API基础URL  
+- `DOWNLOAD_DIR`: 下载文件保存目录  
+- `DOWNLOAD_VIDEO`: 是否下载视频  
+- `DOWNLOAD_PHOTO`: 是否下载照片  
+- `DOWNLOAD_CAPTION`: 是否下载文字描述  
+- `MONITOR_INTERVAL`: 监控间隔（毫秒）  
+- `MAX_RETRY`: 下载失败重试次数  
+
+#### 多存储后端相关
+- `STORAGE_BACKENDS`: 启用的存储后端，使用逗号分隔，例如 `local,dropbox,s3`  
+  - `local`: 本地磁盘（下载器自身，建议始终保留）  
+  - `dropbox`: Dropbox 云存储  
+  - `s3`: 亚马逊 S3 或兼容 S3 的对象存储
+
+**Dropbox 配置（可选，支持短期 token + refresh_token）**
+- `STORAGE_BACKENDS` 中包含 `dropbox` 才会启用 Dropbox 后端  
+- 方案一（旧方式，不推荐）：  
+  - `DROPBOX_ACCESS_TOKEN`: Dropbox 静态访问令牌（现在通常为短期 token，数小时后过期，会导致 401 错误）  
+- 方案二（推荐）：使用 refresh_token 自动刷新  
+  - `DROPBOX_APP_KEY`: Dropbox 应用的 App key  
+  - `DROPBOX_APP_SECRET`: Dropbox 应用的 App secret  
+  - `DROPBOX_REFRESH_TOKEN`: 通过 OAuth 流程获取的 refresh_token，勾选 offline access  
+  - `DROPBOX_BASE_FOLDER`: 保存到 Dropbox 的根目录（默认 `/douyin-downloads`）
+
+**S3 配置（可选）**
+- `S3_REGION`: S3 区域，例如 `ap-southeast-1`  
+- `S3_BUCKET`: S3 存储桶名称  
+- `S3_ACCESS_KEY_ID`: S3 Access Key ID  
+- `S3_SECRET_ACCESS_KEY`: S3 Secret Access Key  
+- `S3_BASE_PREFIX`: S3 上的基础路径前缀（默认 `douyin-downloads`）
 
 ### 用户配置 (config.json)
 - `users`: 用户列表
