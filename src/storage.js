@@ -142,6 +142,7 @@ class StorageManager {
    * Dropbox 后端
    */
   createDropboxBackend() {
+    const self = this; // 保留 StorageManager 实例引用，避免 this 绑定问题
     let Dropbox;
     try {
       Dropbox = require('dropbox').Dropbox;
@@ -156,7 +157,9 @@ class StorageManager {
       name: 'dropbox',
       async upload(localPath, relativePath) {
         try {
-          const accessToken = await this.getDropboxAccessToken();
+          // 注意：这里不能直接用 this.getDropboxAccessToken()
+          // 因为 this 指向的是 backend 对象，而不是 StorageManager 实例
+          const accessToken = await self.getDropboxAccessToken();
           if (!accessToken) {
             console.warn(
               '[dropbox] 未能获取有效的 access token，已跳过本次上传'
