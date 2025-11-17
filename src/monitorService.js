@@ -12,6 +12,8 @@ class MonitorService {
     this.config = null;
     this.jobs = [];
     this.monitorInterval = parseInt(process.env.MONITOR_INTERVAL) || 3600000; // 默认1小时
+    this.monitorIgnore = process.env.MONITOR_IGNORE || ''; // 忽略时间段，格式: "22:00-06:00" 或 "22:00-06:00,14:00-15:00"
+    this.timezone = 'Asia/Shanghai';
   }
 
   /**
@@ -96,9 +98,102 @@ class MonitorService {
   }
 
   /**
+   * 获取当前时间（Asia/Shanghai 时区）
+   * @returns {object} 包含 hour 和 minute 的对象
+   */
+  getCurrentTimeInTimezone() {
+    const now = new Date();
+    // 使用 Intl API 获取指定时区的当前时间
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: this.timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    
+    const parts = formatter.formatToParts(now);
+    const hour = parseInt(parts.find(p => p.type === 'hour').value);
+    const minute = parseInt(parts.find(p => p.type === 'minute').value);
+    
+    return { hour, minute };
+  }
+
+  /**
+   * 解析时间段字符串
+   * @param {string} timeRange - 时间段字符串，格式: "HH:mm-HH:mm"
+   * @returns {object} 包含 start 和 end 的对象，每个都是 {hour, minute}
+   */
+  parseTimeRange(timeRange) {
+    const match = timeRange.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+    if (!match) {
+      throw new Error(`无效的时间段格式: ${timeRange}，应为 HH:mm-HH:mm`);
+    }
+    
+    return {
+      start: {
+        hour: parseInt(match[1]),
+        minute: parseInt(match[2])
+      },
+      end: {
+        hour: parseInt(match[3]),
+        minute: parseInt(match[4])
+      }
+    };
+  }
+
+  /**
+   * 检查当前时间是否在忽略时间段内
+   * @returns {boolean} 如果在忽略时间段内返回 true
+   */
+  isInIgnoreTimeRange() {
+    if (!this.monitorIgnore || this.monitorIgnore.trim() === '') {
+      return false;
+    }
+
+    const { hour: currentHour, minute: currentMinute } = this.getCurrentTimeInTimezone();
+    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+
+    // 解析多个时间段（用逗号分隔）
+    const timeRanges = this.monitorIgnore.split(',').map(range => range.trim()).filter(range => range);
+    
+    for (const range of timeRanges) {
+      try {
+        const { start, end } = this.parseTimeRange(range);
+        const startTimeInMinutes = start.hour * 60 + start.minute;
+        const endTimeInMinutes = end.hour * 60 + end.minute;
+
+        // 处理跨天的情况（例如 22:00-06:00）
+        if (startTimeInMinutes > endTimeInMinutes) {
+          // 跨天：当前时间 >= 开始时间 或 当前时间 <= 结束时间
+          if (currentTimeInMinutes >= startTimeInMinutes || currentTimeInMinutes <= endTimeInMinutes) {
+            return true;
+          }
+        } else {
+          // 不跨天：当前时间在开始和结束时间之间
+          if (currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes <= endTimeInMinutes) {
+            return true;
+          }
+        }
+      } catch (error) {
+        console.warn(`解析忽略时间段失败: ${range}`, error.message);
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * 执行所有用户的监控
    */
   async monitorAllUsers() {
+    // 检查是否在忽略时间段内
+    if (this.isInIgnoreTimeRange()) {
+      const { hour, minute } = this.getCurrentTimeInTimezone();
+      const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      console.log(`当前时间 ${timeStr} (${this.timezone}) 在忽略监控时间段内，跳过本次监控`);
+      return;
+    }
+
     console.log('========== 开始监控所有用户 ==========');
     
     if (!this.config) {

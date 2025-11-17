@@ -43,6 +43,7 @@ npm start
 - `DOWNLOAD_PHOTO`: 是否下载照片  
 - `DOWNLOAD_CAPTION`: 是否下载文字描述  
 - `MONITOR_INTERVAL`: 监控间隔（毫秒）  
+- `MONITOR_IGNORE`: 忽略监控的时间段，格式为 `HH:mm-HH:mm`，支持多个时间段用逗号分隔。例如：`22:00-06:00` 表示晚上10点到早上6点不监控，`22:00-06:00,14:00-15:00` 表示多个时间段。所有时间使用 Asia/Shanghai 时区  
 - `MAX_RETRY`: 下载失败重试次数  
 
 #### 多存储后端相关
