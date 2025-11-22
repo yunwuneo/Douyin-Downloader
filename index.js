@@ -2,6 +2,10 @@ const monitorService = require('./src/monitorService');
 const { ensureDirectory } = require('./src/utils');
 const fs = require('fs-extra');
 const path = require('path');
+const db = require('./src/db');
+const videoProcessor = require('./src/videoProcessor');
+const aiScheduler = require('./src/aiScheduler');
+const WebUIServer = require('./src/webui-server');
 require('dotenv').config();
 
 /**
@@ -21,8 +25,36 @@ async function initializeApp() {
     const downloadDir = process.env.DOWNLOAD_DIR || './downloads';
     await ensureDirectory(downloadDir);
     
+    // 初始化数据库
+    console.log('初始化数据库...');
+    await db.init();
+    
+    // 初始化视频处理器
+    console.log('初始化视频处理器...');
+    await videoProcessor.init();
+    
     // 加载配置
     await monitorService.loadConfig();
+    
+    // 启动AI功能（如果启用）
+    const enableAI = process.env.ENABLE_AI === 'true';
+    if (enableAI) {
+      console.log('========== 启动AI功能 ==========');
+      
+      // 启动AI定时任务（每日总结）
+      aiScheduler.start();
+      console.log('AI定时任务已启动');
+      
+      // 启动Web UI服务器（如果启用）
+      const enableWebUI = process.env.ENABLE_WEBUI !== 'false';
+      if (enableWebUI) {
+        const webuiServer = new WebUIServer();
+        webuiServer.start();
+        console.log('Web UI服务器已启动');
+      }
+    } else {
+      console.log('AI功能未启用（设置 ENABLE_AI=true 启用）');
+    }
     
     // 启动监控服务
     (async () => {
@@ -38,17 +70,24 @@ async function initializeApp() {
     process.on('SIGINT', () => {
       console.log('\n接收到中断信号，正在停止服务...');
       monitorService.stop();
+      if (enableAI) {
+        aiScheduler.stop();
+      }
       process.exit(0);
     });
     
     process.on('SIGTERM', () => {
       console.log('\n接收到终止信号，正在停止服务...');
       monitorService.stop();
+      if (enableAI) {
+        aiScheduler.stop();
+      }
       process.exit(0);
     });
     
   } catch (error) {
     console.error('应用初始化失败:', error.message);
+    console.error(error.stack);
     process.exit(1);
   }
 }

@@ -6,23 +6,30 @@
   "scripts": {
     "start": "node index.js",
     "config-api": "node config-api.js",
+    "webui": "node src/webui-server.js",
+    "analyze": "node scripts/analyze-downloaded-items.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "axios": "^1.6.0",
-    "node-schedule": "^2.1.1",
-    "dotenv": "^16.0.3",
-    "fs-extra": "^11.1.1",
-    "sqlite3": "^5.1.6",
-    "express": "^4.21.1",
-    "cors": "^2.8.5",
-    "dropbox": "^10.34.0",
     "@aws-sdk/client-s3": "^3.645.0",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "dropbox": "^10.34.0",
+    "express": "^4.21.1",
+    "form-data": "^4.0.5",
+    "fs-extra": "^11.1.1",
+    "https-proxy-agent": "^5.0.1",
     "node-fetch": "^2.7.0",
-    "https-proxy-agent": "^5.0.1"
+    "node-schedule": "^2.1.1",
+    "nodemailer": "^6.9.7",
+    "sqlite3": "^5.1.6"
   },
-  "devDependencies": {},
-  "keywords": ["douyin", "downloader", "automation"],
+  "keywords": [
+    "douyin",
+    "downloader",
+    "automation"
+  ],
   "author": "",
   "license": "MIT"
 }
