@@ -554,6 +554,13 @@ class WebUIServer {
         scroll-snap-align: start;
         position: relative;
     }
+    
+    .line-clamp-2 {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
   </style>
 </head>
 <body class="h-screen w-full overflow-hidden flex flex-col">
@@ -605,6 +612,20 @@ class WebUIServer {
         
         const safeAwemeId = String(video.aweme_id).replace(/'/g, "\\'").replace(/"/g, '&quot;');
         const safeUserName = (video.user_name || '未知用户').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // 使用author_nickname（如果存在），否则使用user_name
+        const authorName = (video.author_nickname || video.user_name || '未知用户').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // 视频标题
+        const videoTitle = (video.title || video.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // 统计信息
+        const diggCount = video.digg_count || 0;
+        const commentCount = video.comment_count || 0;
+        const shareCount = video.share_count || 0;
+        // 格式化数字
+        const formatNumber = (num) => {
+          if (num >= 10000) return (num / 10000).toFixed(1) + 'w';
+          if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+          return num.toString();
+        };
         const mediaUrl = video.mediaUrl || '';
         const isAnalyzed = video.isAnalyzed === true && video.ai_features;
         
@@ -656,13 +677,42 @@ class WebUIServer {
                 </div>
             </div>
 
-            <!-- Bottom Info Overlay (No Description) -->
-            <div class="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/60 to-transparent px-4 pb-8 pt-20 z-10 pointer-events-none">
-                <div class="pointer-events-auto max-w-[80%]">
-                    <h3 class="font-bold text-lg text-white mb-1 shadow-black drop-shadow-md text-shadow">@\${safeUserName}</h3>
+            <!-- Bottom Info Overlay -->
+            <div class="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent px-4 pb-8 pt-24 z-10 pointer-events-none">
+                <div class="pointer-events-auto max-w-[85%]">
+                    <!-- Author Name -->
+                    <div class="flex items-center gap-2 mb-2">
+                        <h3 class="font-bold text-lg text-white shadow-black drop-shadow-md text-shadow">@\${authorName}</h3>
+                        \${video.author_unique_id && video.author_unique_id !== video.user_name ? \`<span class="text-xs text-white/60 font-normal">(\${safeUserName})</span>\` : ''}
+                    </div>
                     
-                    <!-- Only Tags Here -->
-                     <div class="flex flex-wrap gap-2 mt-2" id="tags-preview-\${safeAwemeId}">
+                    <!-- Video Title -->
+                    \${videoTitle ? \`
+                    <p class="text-white text-sm mb-3 leading-relaxed line-clamp-2 shadow-black drop-shadow-md">
+                        \${videoTitle}
+                    </p>
+                    \` : ''}
+                    
+                    <!-- Statistics -->
+                    \${(diggCount > 0 || commentCount > 0 || shareCount > 0) ? \`
+                    <div class="flex items-center gap-4 mb-3 text-white/80 text-xs">
+                        \${diggCount > 0 ? \`<div class="flex items-center gap-1">
+                            <i class="fas fa-heart text-red-400"></i>
+                            <span>\${formatNumber(diggCount)}</span>
+                        </div>\` : ''}
+                        \${commentCount > 0 ? \`<div class="flex items-center gap-1">
+                            <i class="fas fa-comment text-blue-400"></i>
+                            <span>\${formatNumber(commentCount)}</span>
+                        </div>\` : ''}
+                        \${shareCount > 0 ? \`<div class="flex items-center gap-1">
+                            <i class="fas fa-share text-green-400"></i>
+                            <span>\${formatNumber(shareCount)}</span>
+                        </div>\` : ''}
+                    </div>
+                    \` : ''}
+                    
+                    <!-- Tags -->
+                    <div class="flex flex-wrap gap-2" id="tags-preview-\${safeAwemeId}">
                         \${isAnalyzed && video.ai_features.top_tags ? video.ai_features.top_tags.slice(0,5).map(t => \`<span class="text-xs px-2 py-1 bg-white/20 rounded-md backdrop-blur-sm text-white/90 border border-white/10">#\${t}</span>\`).join('') : ''}
                     </div>
                 </div>

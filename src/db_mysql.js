@@ -192,6 +192,33 @@ class MySQLDatabase {
   }
 
   /**
+   * 从作品数据中提取常用字段
+   */
+  extractCommonFields(item) {
+    if (!item) {
+      return {};
+    }
+    
+    return {
+      title: item.share_info?.share_title || item.desc || null,
+      description: item.desc || null,
+      author_nickname: item.author?.nickname || null,
+      author_unique_id: item.author?.unique_id || null,
+      digg_count: item.statistics?.digg_count || 0,
+      comment_count: item.statistics?.comment_count || 0,
+      share_count: item.statistics?.share_count || 0,
+      collect_count: item.statistics?.collect_count || 0,
+      create_time: item.create_time || null,
+      duration: item.duration || item.video?.duration || null,
+      video_width: item.video?.width || null,
+      video_height: item.video?.height || null,
+      music_title: item.music?.title || null,
+      music_author: item.music?.author || null,
+      poi_name: item.poi_info?.poi_name || null
+    };
+  }
+
+  /**
    * 保存作品信息
    */
   async saveItems(user, items) {
@@ -202,18 +229,39 @@ class MySQLDatabase {
     // 这里为了保持和 SQLite 的 INSERT OR IGNORE 一致的行为
     const sql = `
       INSERT IGNORE INTO download_status 
-      (user_id, user_name, aweme_id, status, max_cursor)
-      VALUES (?, ?, ?, ?, ?)
+      (user_id, user_name, aweme_id, status, max_cursor,
+       title, description, author_nickname, author_unique_id,
+       digg_count, comment_count, share_count, collect_count,
+       create_time, duration, video_width, video_height,
+       music_title, music_author, poi_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     // 批量插入可能更高效，但为了保持简单循环逻辑
     for (const item of items) {
+      const commonFields = this.extractCommonFields(item);
+      
       await this.pool.execute(sql, [
         user_id,
         user_name,
         item.aweme_id,
         'pending',
-        user.max_cursor
+        user.max_cursor,
+        commonFields.title,
+        commonFields.description,
+        commonFields.author_nickname,
+        commonFields.author_unique_id,
+        commonFields.digg_count,
+        commonFields.comment_count,
+        commonFields.share_count,
+        commonFields.collect_count,
+        commonFields.create_time,
+        commonFields.duration,
+        commonFields.video_width,
+        commonFields.video_height,
+        commonFields.music_title,
+        commonFields.music_author,
+        commonFields.poi_name
       ]);
     }
   }
@@ -250,6 +298,59 @@ class MySQLDatabase {
     params.push(aweme_id);
 
     await this.pool.execute(sql, params);
+  }
+
+  /**
+   * 更新视频完整信息（包括video_info和常用字段）
+   * @param {string} aweme_id - 视频ID
+   * @param {object} item - 完整的作品数据对象
+   */
+  async updateVideoInfo(aweme_id, item) {
+    if (!item) {
+      return;
+    }
+
+    // 提取常用字段
+    const commonFields = this.extractCommonFields(item);
+    
+    // 将完整JSON转换为字符串
+    const videoInfoJson = JSON.stringify(item);
+    
+    // 构建更新SQL
+    const updateFields = ['video_info = ?'];
+    const updateValues = [videoInfoJson];
+    
+    const fieldMapping = {
+      title: 'title',
+      description: 'description',
+      author_nickname: 'author_nickname',
+      author_unique_id: 'author_unique_id',
+      digg_count: 'digg_count',
+      comment_count: 'comment_count',
+      share_count: 'share_count',
+      collect_count: 'collect_count',
+      create_time: 'create_time',
+      duration: 'duration',
+      video_width: 'video_width',
+      video_height: 'video_height',
+      music_title: 'music_title',
+      music_author: 'music_author',
+      poi_name: 'poi_name'
+    };
+    
+    for (const [key, column] of Object.entries(fieldMapping)) {
+      if (commonFields.hasOwnProperty(key)) {
+        updateFields.push(`${column} = ?`);
+        updateValues.push(commonFields[key]);
+      }
+    }
+    
+    updateValues.push(aweme_id);
+    
+    await this.pool.execute(
+      `UPDATE download_status SET ${updateFields.join(', ')} WHERE aweme_id = ?`,
+      updateValues
+    );
   }
 
   /**
@@ -380,6 +481,10 @@ class MySQLDatabase {
   async getUnanalyzedVideos(limit = 10) {
     const [rows] = await this.pool.execute(
       `SELECT DISTINCT ds.aweme_id, ds.user_id, ds.user_name, ds.created_at, ds.updated_at,
+              ds.title, ds.description, ds.author_nickname, ds.author_unique_id,
+              ds.digg_count, ds.comment_count, ds.share_count, ds.collect_count,
+              ds.create_time, ds.duration, ds.video_width, ds.video_height,
+              ds.music_title, ds.music_author, ds.poi_name,
               CASE WHEN vf.aweme_id IS NOT NULL THEN 1 ELSE 0 END as is_analyzed
        FROM download_status ds
        LEFT JOIN video_features vf ON ds.aweme_id = vf.aweme_id

@@ -256,6 +256,13 @@ class Downloader {
         
         if (success) {
           await db.updateItemStatus(item.aweme_id || item.id, 'completed');
+          // 更新视频完整信息（包括video_info和常用字段）
+          try {
+            await db.updateVideoInfo(item.aweme_id || item.id, item);
+          } catch (error) {
+            console.warn(`更新视频信息失败 (${item.aweme_id || item.id}):`, error.message);
+            // 不阻止下载流程，只记录警告
+          }
           downloadedCount++;
         } else {
           // 获取当前尝试次数
