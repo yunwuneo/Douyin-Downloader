@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const db = require('./db');
 const videoProcessor = require('./videoProcessor');
 const aiAnalyzer = require('./aiAnalyzer');
+const vectorStore = require('./vectorStore');
 require('dotenv').config();
 
 /**
@@ -192,6 +193,26 @@ class SummaryService {
       // 保存合并后的特征（media_type设为'image'）
       await db.saveVideoFeatures(aweme_id, mainImagePath, analysis.merged, imagePaths.length, 'image');
 
+      // ========== 生成并保存向量 ==========
+      try {
+        const textToEmbed = `
+          场景: ${analysis.merged.primary_scene_type || ''};
+          人物: ${analysis.merged.people || ''};
+          风格: ${analysis.merged.primary_styles ? analysis.merged.primary_styles.join(',') : ''};
+          描述: ${analysis.merged.description_summary || ''};
+          标签: ${analysis.merged.top_tags ? analysis.merged.top_tags.join(',') : ''}
+        `.trim();
+
+        const vector = await aiAnalyzer.generateEmbedding(textToEmbed);
+        if (vector) {
+          await vectorStore.saveVector(aweme_id, vector, textToEmbed);
+          console.log(`已保存向量数据: ${aweme_id}`);
+        }
+      } catch (vecError) {
+        console.error(`保存向量数据失败 (${aweme_id}):`, vecError.message);
+      }
+      // ==================================
+
       console.log(`图片分析完成: ${aweme_id}`);
       return {
         aweme_id,
@@ -255,6 +276,26 @@ class SummaryService {
 
       // 保存合并后的特征（media_type设为'video'）
       await db.saveVideoFeatures(aweme_id, videoPath, analysis.merged, frames.length, 'video');
+
+      // ========== 生成并保存向量 ==========
+      try {
+        const textToEmbed = `
+          场景: ${analysis.merged.primary_scene_type || ''};
+          人物: ${analysis.merged.people || ''};
+          风格: ${analysis.merged.primary_styles ? analysis.merged.primary_styles.join(',') : ''};
+          描述: ${analysis.merged.description_summary || ''};
+          标签: ${analysis.merged.top_tags ? analysis.merged.top_tags.join(',') : ''}
+        `.trim();
+
+        const vector = await aiAnalyzer.generateEmbedding(textToEmbed);
+        if (vector) {
+          await vectorStore.saveVector(aweme_id, vector, textToEmbed);
+          console.log(`已保存向量数据: ${aweme_id}`);
+        }
+      } catch (vecError) {
+        console.error(`保存向量数据失败 (${aweme_id}):`, vecError.message);
+      }
+      // ==================================
 
       console.log(`视频分析完成: ${aweme_id}`);
       return {

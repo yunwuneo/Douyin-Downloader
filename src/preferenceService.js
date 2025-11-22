@@ -1,4 +1,6 @@
 const db = require('./db');
+const vectorStore = require('./vectorStore');
+const aiAnalyzer = require('./aiAnalyzer');
 
 /**
  * 用户偏好学习服务
@@ -9,6 +11,9 @@ class PreferenceService {
     // 偏好权重：喜欢 +1，不喜欢 -1
     this.likeWeight = parseFloat(process.env.PREFERENCE_LIKE_WEIGHT) || 1.0;
     this.dislikeWeight = parseFloat(process.env.PREFERENCE_DISLIKE_WEIGHT) || -1.0;
+    
+    // 向量推荐权重 (0-1)，剩余为标签权重
+    this.vectorWeight = parseFloat(process.env.PREFERENCE_VECTOR_WEIGHT) || 0.7;
   }
 
   /**
@@ -74,6 +79,25 @@ class PreferenceService {
 
       await Promise.all(updatePromises);
 
+      // ========== 向量数据库更新 ==========
+      if (feedbackType === 'like') {
+        try {
+          // 获取视频向量
+          const videoVector = await vectorStore.getVector(aweme_id);
+          if (videoVector) {
+            console.log(`更新用户向量画像 (基于 ${aweme_id})`);
+            await vectorStore.updateUserProfile(videoVector);
+          } else {
+            // 如果向量不存在，尝试生成（这可能比较慢，但在异步任务中也许可以接受）
+            // 这里为了响应速度，暂时跳过或记录日志
+            console.warn(`视频向量不存在，无法更新向量画像: ${aweme_id}`);
+            // TODO: 可以触发后台任务生成向量
+          }
+        } catch (vecError) {
+          console.error(`更新向量画像失败:`, vecError.message);
+        }
+      }
+
       console.log(`用户反馈处理完成: ${aweme_id} - ${feedbackType}`);
       console.log(`更新了 ${Object.keys(features).length} 个特征偏好`);
 
@@ -118,7 +142,41 @@ class PreferenceService {
    */
   async getVideoRecommendationScore(aweme_id) {
     try {
-      return await db.calculateVideoPreferenceScore(aweme_id);
+      // 1. 获取标签基础分数
+      const tagScore = await db.calculateVideoPreferenceScore(aweme_id);
+      
+      // 2. 获取向量相似度分数
+      let vectorScore = 0;
+      try {
+        const userVector = await vectorStore.getUserProfileVector();
+        const videoVector = await vectorStore.getVector(aweme_id);
+        
+        if (userVector && videoVector) {
+          const similarity = aiAnalyzer.cosineSimilarity(userVector, videoVector);
+          // 将相似度 (-1 到 1) 映射到分数 (比如 0 到 10，或者保持 -1 到 1)
+          // 假设 tagScore 大约是 0-10 范围 (根据权重和log(count))
+          // 我们可以将相似度归一化到类似范围，或者只是加权
+          vectorScore = similarity; // -1 to 1
+        }
+      } catch (vecError) {
+        console.warn(`获取向量分数失败:`, vecError.message);
+      }
+
+      // 3. 混合分数
+      // tagScore 通常是 > 0 的累加值。我们需要知道它的量级。
+      // 假设 tagScore 是 "匹配数 * 权重"。
+      
+      // 如果没有向量数据，回退到纯标签
+      if (vectorScore === 0) return tagScore;
+
+      // 混合策略：
+      // 将 vectorScore 映射到 0-10 (假设)
+      const normalizedVectorScore = (vectorScore + 1) * 5; // 0 to 10
+      
+      // 简单加权
+      // 这里的混合逻辑可能需要调优
+      return (tagScore * (1 - this.vectorWeight)) + (normalizedVectorScore * this.vectorWeight);
+      
     } catch (error) {
       console.error(`获取推荐分数失败:`, error.message);
       return 0;

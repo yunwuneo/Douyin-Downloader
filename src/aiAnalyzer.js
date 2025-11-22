@@ -70,6 +70,9 @@ class AIAnalyzer {
     this.debug = process.env.AI_DEBUG === 'true'; // 是否启用调试日志
     this.logRequests = process.env.AI_LOG_REQUESTS === 'true'; // 是否记录请求日志
     
+    // Embedding配置
+    this.embeddingModel = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
+
     // 初始化axios实例（支持代理和自定义配置）
     this.initAxiosInstance();
   }
@@ -416,6 +419,90 @@ class AIAnalyzer {
       }
       return null;
     }
+  }
+
+  /**
+   * 生成文本的Embedding向量
+   * @param {string} text - 要生成向量的文本
+   * @returns {Promise<Array<number>>} 向量数组
+   */
+  async generateEmbedding(text) {
+    try {
+      if (!text || typeof text !== 'string') {
+        return null;
+      }
+
+      // 截断过长的文本（OpenAI限制8191 tokens，这里保守截断）
+      const truncatedText = text.slice(0, 8000);
+
+      if (this.useOpenAI) {
+        const apiUrl = `${this.apiBase}/embeddings`;
+        const headers = {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        };
+
+        if (this.organizationId) {
+          headers['OpenAI-Organization'] = this.organizationId;
+        }
+
+        const response = await this.axiosInstance.post(
+          apiUrl,
+          {
+            model: this.embeddingModel,
+            input: truncatedText
+          },
+          { headers }
+        );
+
+        if (response.data && response.data.data && response.data.data.length > 0) {
+          return response.data.data[0].embedding;
+        }
+      } else if (this.useLocalModel && this.localAIService) {
+        // 本地模型适配
+        const response = await axios.post(
+          this.localAIService,
+          {
+            input: truncatedText,
+            task: 'embedding'
+          }
+        );
+        return response.data.embedding;
+      }
+
+      return null;
+    } catch (error) {
+      console.error(`生成Embedding失败:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * 计算两个向量的余弦相似度
+   * @param {Array<number>} vecA 
+   * @param {Array<number>} vecB 
+   * @returns {number} 相似度 (-1 到 1)
+   */
+  cosineSimilarity(vecA, vecB) {
+    if (!vecA || !vecB || vecA.length !== vecB.length) {
+      return 0;
+    }
+
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < vecA.length; i++) {
+      dotProduct += vecA[i] * vecB[i];
+      normA += vecA[i] * vecA[i];
+      normB += vecB[i] * vecB[i];
+    }
+
+    if (normA === 0 || normB === 0) {
+      return 0;
+    }
+
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
   /**
