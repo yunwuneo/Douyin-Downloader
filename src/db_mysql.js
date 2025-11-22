@@ -1,0 +1,631 @@
+const mysql = require('mysql2/promise');
+const path = require('path');
+
+class MySQLDatabase {
+  constructor() {
+    this.pool = null;
+  }
+
+  /**
+   * 初始化数据库连接
+   */
+  async init() {
+    // 从环境变量获取配置
+    const config = {
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT || '3306'),
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || '',
+      database: process.env.DB_NAME || 'douyin_downloader',
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      timezone: '+08:00',
+      dateStrings: true // 返回字符串格式的时间，保持与SQLite行为一致
+    };
+
+    try {
+      // 先尝试连接到服务器（不带数据库名）以创建数据库
+      const tempConnection = await mysql.createConnection({
+        host: config.host,
+        port: config.port,
+        user: config.user,
+        password: config.password
+      });
+
+      await tempConnection.query(`CREATE DATABASE IF NOT EXISTS \`${config.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+      await tempConnection.end();
+
+      // 创建连接池
+      this.pool = mysql.createPool(config);
+      
+      console.log(`MySQL数据库连接成功: ${config.host}:${config.port}/${config.database}`);
+      
+      // 创建表
+      await this.createTables();
+      console.log('数据库表检查/创建完成');
+      
+      // 执行数据库迁移
+      await this.checkAndAddColumns();
+      
+    } catch (err) {
+      console.error('连接MySQL数据库失败:', err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * 创建数据库表
+   */
+  async createTables() {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // 创建下载状态表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS download_status (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id VARCHAR(64) NOT NULL,
+          user_name VARCHAR(255) NOT NULL,
+          aweme_id VARCHAR(64) NOT NULL,
+          status VARCHAR(32) DEFAULT 'pending',
+          max_cursor BIGINT DEFAULT 0,
+          attempt_count INT DEFAULT 0,
+          last_attempt DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uk_user_aweme (user_id, aweme_id),
+          INDEX idx_user_id (user_id),
+          INDEX idx_aweme_id (aweme_id),
+          INDEX idx_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
+      // 创建视频特征表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS video_features (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          aweme_id VARCHAR(64) NOT NULL UNIQUE,
+          video_path TEXT,
+          description TEXT,
+          ai_features LONGTEXT,
+          frame_count INT DEFAULT 0,
+          media_type VARCHAR(32) DEFAULT 'video',
+          analyzed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_features_aweme_id (aweme_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
+      // 创建视频帧表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS video_frames (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          aweme_id VARCHAR(64) NOT NULL,
+          frame_index INT NOT NULL,
+          frame_path TEXT NOT NULL,
+          ai_description TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uk_aweme_frame (aweme_id, frame_index)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
+      // 创建用户偏好表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS user_preferences (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          feature_key VARCHAR(128) NOT NULL,
+          feature_value VARCHAR(255) NOT NULL,
+          preference_score FLOAT DEFAULT 0.0,
+          sample_count INT DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uk_feature (feature_key, feature_value)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
+      // 创建用户反馈表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS user_feedback (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          aweme_id VARCHAR(64) NOT NULL,
+          feedback_type VARCHAR(32) NOT NULL,
+          summary_id VARCHAR(64),
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_feedback_aweme_id (aweme_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
+      // 创建每日总结表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS daily_summaries (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          summary_date VARCHAR(32) NOT NULL UNIQUE,
+          summary_content MEDIUMTEXT,
+          video_count INT DEFAULT 0,
+          email_sent TINYINT DEFAULT 0,
+          webui_token VARCHAR(128),
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_summary_date (summary_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
+      await connection.commit();
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
+   * 检查并添加缺失的列（数据库迁移）
+   */
+  async checkAndAddColumns() {
+    try {
+      // 检查 video_features 表是否有 media_type 列
+      const [columns] = await this.pool.query("SHOW COLUMNS FROM video_features LIKE 'media_type'");
+      
+      if (columns.length === 0) {
+        console.log('检测到 video_features 表缺少 media_type 列，正在添加...');
+        await this.pool.query("ALTER TABLE video_features ADD COLUMN media_type VARCHAR(32) DEFAULT 'video'");
+        console.log('成功添加 media_type 列到 video_features 表');
+      }
+    } catch (err) {
+      console.error('检查/迁移数据库列失败:', err.message);
+      // 不抛出错误，以免影响主流程
+    }
+  }
+
+  /**
+   * 关闭数据库连接
+   */
+  async close() {
+    if (this.pool) {
+      await this.pool.end();
+      console.log('数据库连接已关闭');
+    }
+  }
+
+  /**
+   * 保存作品信息
+   */
+  async saveItems(user, items) {
+    const user_id = user.sec_user_id;
+    const user_name = user.username;
+
+    // 使用 INSERT IGNORE 或 ON DUPLICATE KEY UPDATE
+    // 这里为了保持和 SQLite 的 INSERT OR IGNORE 一致的行为
+    const sql = `
+      INSERT IGNORE INTO download_status 
+      (user_id, user_name, aweme_id, status, max_cursor)
+      VALUES (?, ?, ?, ?, ?)
+    `;
+
+    // 批量插入可能更高效，但为了保持简单循环逻辑
+    for (const item of items) {
+      await this.pool.execute(sql, [
+        user_id,
+        user_name,
+        item.aweme_id,
+        'pending',
+        user.max_cursor
+      ]);
+    }
+  }
+
+  /**
+   * 获取待下载的作品ID列表
+   */
+  async getPendingItems(user_id) {
+    const [rows] = await this.pool.execute(
+      `SELECT aweme_id FROM download_status 
+       WHERE user_id = ? AND status IN ('pending', 'failed') 
+       ORDER BY created_at ASC`,
+      [user_id]
+    );
+    return rows.map(row => row.aweme_id);
+  }
+
+  /**
+   * 更新作品下载状态
+   */
+  async updateItemStatus(aweme_id, status, attempt_count = null) {
+    const params = [status]; // updated_at 会自动更新如果定义了 ON UPDATE CURRENT_TIMESTAMP，但我们可以显式设置以防万一
+    // MySQL CURRENT_TIMESTAMP 自动更新，但我们在SQL里显式写
+    
+    // 注意：MySQL update syntax
+    let sql = `UPDATE download_status SET status = ?`; // updated_at will auto update or we set it
+    
+    if (attempt_count !== null) {
+      sql += `, attempt_count = ?, last_attempt = NOW()`;
+      params.push(attempt_count);
+    }
+    
+    sql += ` WHERE aweme_id = ?`;
+    params.push(aweme_id);
+
+    await this.pool.execute(sql, params);
+  }
+
+  /**
+   * 更新用户的最大游标
+   */
+  async updateUserCursor(user_id, max_cursor) {
+    await this.pool.execute(
+      `UPDATE download_status 
+       SET max_cursor = ? 
+       WHERE user_id = ?`,
+      [max_cursor, user_id]
+    );
+  }
+
+  /**
+   * 检查作品是否已下载
+   */
+  async isItemDownloaded(user_id, aweme_id) {
+    const [rows] = await this.pool.execute(
+      `SELECT id FROM download_status 
+       WHERE user_id = ? AND aweme_id = ? AND status = 'completed'`,
+      [user_id, aweme_id]
+    );
+    return rows.length > 0;
+  }
+
+  /**
+   * 根据aweme_id获取下载状态
+   */
+  async getDownloadStatus(aweme_id) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM download_status WHERE aweme_id = ?`,
+      [aweme_id]
+    );
+    return rows[0] || null;
+  }
+
+  /**
+   * 获取用户已下载的作品数量
+   */
+  async getDownloadedCount(user_id) {
+    const [rows] = await this.pool.execute(
+      `SELECT COUNT(*) as count FROM download_status 
+       WHERE user_id = ? AND status = 'completed'`,
+      [user_id]
+    );
+    return rows[0] ? rows[0].count : 0;
+  }
+
+  /**
+   * 获取用户所有作品的状态统计
+   */
+  async getUserStats(user_id) {
+    const [rows] = await this.pool.execute(
+      `SELECT status, COUNT(*) as count FROM download_status 
+       WHERE user_id = ? 
+       GROUP BY status`,
+      [user_id]
+    );
+    
+    const stats = {};
+    rows.forEach(row => {
+      stats[row.status] = row.count;
+    });
+    return stats;
+  }
+
+  // ========== AI功能相关方法 ==========
+
+  /**
+   * 保存视频特征信息
+   */
+  async saveVideoFeatures(aweme_id, videoPath, aiFeatures, frameCount, mediaType = 'video') {
+    const aiFeaturesJson = JSON.stringify(aiFeatures);
+    // MySQL REPLACE INTO or INSERT ... ON DUPLICATE KEY UPDATE
+    await this.pool.execute(
+      `INSERT INTO video_features 
+       (aweme_id, video_path, ai_features, frame_count, media_type, analyzed_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+       ON DUPLICATE KEY UPDATE
+       video_path = VALUES(video_path),
+       ai_features = VALUES(ai_features),
+       frame_count = VALUES(frame_count),
+       media_type = VALUES(media_type),
+       analyzed_at = NOW(),
+       updated_at = NOW()`,
+      [aweme_id, videoPath, aiFeaturesJson, frameCount, mediaType]
+    );
+  }
+
+  /**
+   * 获取视频特征
+   */
+  async getVideoFeatures(aweme_id) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM video_features WHERE aweme_id = ?`,
+      [aweme_id]
+    );
+    const row = rows[0];
+    if (row && row.ai_features) {
+      try {
+        row.ai_features = JSON.parse(row.ai_features);
+      } catch (e) {
+        row.ai_features = {};
+      }
+    }
+    return row;
+  }
+
+  /**
+   * 保存视频帧信息
+   */
+  async saveVideoFrame(aweme_id, frameIndex, framePath, aiDescription) {
+    await this.pool.execute(
+      `INSERT INTO video_frames 
+       (aweme_id, frame_index, frame_path, ai_description)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+       frame_path = VALUES(frame_path),
+       ai_description = VALUES(ai_description)`,
+      [aweme_id, frameIndex, framePath, aiDescription]
+    );
+  }
+
+  /**
+   * 获取未分析的视频列表
+   */
+  async getUnanalyzedVideos(limit = 10) {
+    const [rows] = await this.pool.execute(
+      `SELECT DISTINCT ds.aweme_id, ds.user_id, ds.user_name, ds.created_at, ds.updated_at,
+              CASE WHEN vf.aweme_id IS NOT NULL THEN 1 ELSE 0 END as is_analyzed
+       FROM download_status ds
+       LEFT JOIN video_features vf ON ds.aweme_id = vf.aweme_id
+       LEFT JOIN user_feedback uf ON ds.aweme_id = uf.aweme_id
+       WHERE ds.status = 'completed' 
+       AND (
+         (vf.aweme_id IS NULL)
+         OR
+         (vf.aweme_id IS NOT NULL AND uf.aweme_id IS NULL)
+       )
+       ORDER BY is_analyzed DESC, RAND()
+       LIMIT ?`,
+      [limit] // RAND() instead of RANDOM()
+    );
+    return rows || [];
+  }
+
+  /**
+   * 获取仅未分析的视频列表
+   */
+  async getUnanalyzedVideosForAnalysis(limit = 10) {
+    const [rows] = await this.pool.execute(
+      `SELECT DISTINCT ds.aweme_id, ds.user_id, ds.user_name, ds.created_at, ds.updated_at
+       FROM download_status ds
+       LEFT JOIN video_features vf ON ds.aweme_id = vf.aweme_id
+       WHERE ds.status = 'completed' 
+       AND vf.aweme_id IS NULL
+       ORDER BY RAND()
+       LIMIT ?`,
+      [limit]
+    );
+    return rows || [];
+  }
+
+  /**
+   * 获取分析统计信息
+   */
+  async getAnalysisStats() {
+    const [totalRows] = await this.pool.execute(
+      `SELECT COUNT(DISTINCT aweme_id) as total_downloaded
+       FROM download_status
+       WHERE status = 'completed'`
+    );
+    
+    const [analyzedRows] = await this.pool.execute(
+      `SELECT COUNT(DISTINCT vf.aweme_id) as total_analyzed
+       FROM video_features vf
+       INNER JOIN download_status ds ON vf.aweme_id = ds.aweme_id
+       WHERE ds.status = 'completed'`
+    );
+    
+    const [unanalyzedRows] = await this.pool.execute(
+      `SELECT COUNT(DISTINCT ds.aweme_id) as total_unanalyzed
+       FROM download_status ds
+       LEFT JOIN video_features vf ON ds.aweme_id = vf.aweme_id
+       WHERE ds.status = 'completed'
+       AND vf.aweme_id IS NULL`
+    );
+
+    return {
+      totalDownloaded: totalRows[0]?.total_downloaded || 0,
+      totalAnalyzed: analyzedRows[0]?.total_analyzed || 0,
+      totalUnanalyzed: unanalyzedRows[0]?.total_unanalyzed || 0
+    };
+  }
+
+  /**
+   * 获取视频的所有帧
+   */
+  async getVideoFrames(aweme_id) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM video_frames WHERE aweme_id = ? ORDER BY frame_index ASC`,
+      [aweme_id]
+    );
+    return rows || [];
+  }
+
+  /**
+   * 获取今日下载的视频列表
+   */
+  async getTodayDownloadedVideos(date) {
+    const dateStr = date || new Date().toISOString().split('T')[0];
+    const [rows] = await this.pool.execute(
+      `SELECT ds.*, vf.ai_features, vf.video_path 
+       FROM download_status ds
+       LEFT JOIN video_features vf ON ds.aweme_id = vf.aweme_id
+       WHERE DATE(ds.updated_at) = ?
+       AND ds.status = 'completed'
+       ORDER BY ds.updated_at DESC`,
+      [dateStr]
+    );
+    
+    rows.forEach(row => {
+      if (row.ai_features) {
+        try {
+          row.ai_features = JSON.parse(row.ai_features);
+        } catch (e) {
+          row.ai_features = {};
+        }
+      }
+    });
+    return rows || [];
+  }
+
+  /**
+   * 创建或更新每日总结
+   */
+  async saveDailySummary(date, summaryContent, videoCount, webuiToken) {
+    const dateStr = date || new Date().toISOString().split('T')[0];
+    await this.pool.execute(
+      `INSERT INTO daily_summaries 
+       (summary_date, summary_content, video_count, webui_token, updated_at)
+       VALUES (?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE
+       summary_content = VALUES(summary_content),
+       video_count = VALUES(video_count),
+       webui_token = VALUES(webui_token),
+       updated_at = NOW()`,
+      [dateStr, summaryContent, videoCount, webuiToken]
+    );
+  }
+
+  /**
+   * 获取每日总结
+   */
+  async getDailySummary(date) {
+    const dateStr = date || new Date().toISOString().split('T')[0];
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM daily_summaries WHERE summary_date = ?`,
+      [dateStr]
+    );
+    return rows[0];
+  }
+
+  /**
+   * 标记每日总结邮件已发送
+   */
+  async markDailySummaryEmailSent(date) {
+    const dateStr = date || new Date().toISOString().split('T')[0];
+    await this.pool.execute(
+      `UPDATE daily_summaries SET email_sent = 1 WHERE summary_date = ?`,
+      [dateStr]
+    );
+  }
+
+  /**
+   * 保存用户反馈
+   */
+  async saveUserFeedback(aweme_id, feedbackType, summaryId) {
+    await this.pool.execute(
+      `INSERT INTO user_feedback (aweme_id, feedback_type, summary_id)
+       VALUES (?, ?, ?)`,
+      [aweme_id, feedbackType, summaryId]
+    );
+  }
+
+  /**
+   * 获取用户反馈
+   */
+  async getUserFeedback(aweme_id) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM user_feedback WHERE aweme_id = ? ORDER BY created_at DESC`,
+      [aweme_id]
+    );
+    return rows || [];
+  }
+
+  /**
+   * 更新用户偏好分数
+   */
+  async updateUserPreference(featureKey, featureValue, scoreDelta) {
+    // 先查找是否存在
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM user_preferences WHERE feature_key = ? AND feature_value = ?`,
+      [featureKey, featureValue]
+    );
+    const row = rows[0];
+
+    if (row) {
+      // 更新现有记录（加权平均）
+      const newSampleCount = row.sample_count + 1;
+      const currentScore = row.preference_score;
+      const newScore = (currentScore * row.sample_count + scoreDelta) / newSampleCount;
+      
+      await this.pool.execute(
+        `UPDATE user_preferences 
+         SET preference_score = ?, sample_count = ?, updated_at = NOW()
+         WHERE feature_key = ? AND feature_value = ?`,
+        [newScore, newSampleCount, featureKey, featureValue]
+      );
+    } else {
+      // 创建新记录
+      await this.pool.execute(
+        `INSERT INTO user_preferences (feature_key, feature_value, preference_score, sample_count)
+         VALUES (?, ?, ?, 1)`,
+        [featureKey, featureValue, scoreDelta]
+      );
+    }
+  }
+
+  /**
+   * 获取所有用户偏好
+   */
+  async getUserPreferences() {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM user_preferences ORDER BY preference_score DESC, sample_count DESC`
+    );
+    return rows || [];
+  }
+
+  /**
+   * 根据偏好计算视频推荐分数
+   */
+  async calculateVideoPreferenceScore(aweme_id) {
+    try {
+      const features = await this.getVideoFeatures(aweme_id);
+      if (!features || !features.ai_features) {
+        return 0;
+      }
+
+      const preferences = await this.getUserPreferences();
+      if (preferences.length === 0) {
+        return 0;
+      }
+
+      // 计算匹配分数
+      let totalScore = 0;
+      let matchCount = 0;
+      const aiFeatures = features.ai_features;
+
+      preferences.forEach(pref => {
+        if (pref.preference_score > 0 && aiFeatures[pref.feature_key] === pref.feature_value) {
+          totalScore += pref.preference_score * Math.log(pref.sample_count + 1);
+          matchCount++;
+        }
+      });
+
+      // 归一化分数
+      const finalScore = matchCount > 0 ? totalScore / matchCount : 0;
+      return finalScore;
+    } catch (error) {
+      console.error('计算推荐分数失败:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = new MySQLDatabase();
+

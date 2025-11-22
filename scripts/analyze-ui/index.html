@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 分析控制台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #F5F5F7;
+            color: #1D1D1F;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+        }
+        .stat-card {
+            background: white;
+            border-radius: 18px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.03);
+            transition: transform 0.2s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+        .log-container {
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+        }
+        
+        /* Scanning Animation */
+        @keyframes scan {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(200%); }
+        }
+        .animate-scan {
+            animation: scan 2s linear infinite;
+        }
+
+        /* List Transitions */
+        .list-enter-active,
+        .list-leave-active {
+            transition: all 0.5s ease;
+        }
+        .list-enter-from,
+        .list-leave-to {
+            opacity: 0;
+            transform: translateY(30px) scale(0.9);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #D1D1D6;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #8E8E93;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+    <div id="app" class="flex-1 flex flex-col h-full p-6 gap-6 max-w-7xl mx-auto w-full">
+        
+        <!-- Header -->
+        <header class="flex justify-between items-center py-2">
+            <div class="flex items-center gap-4">
+                <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-semibold tracking-tight">AI 分析控制台</h1>
+                    <div class="flex items-center gap-2 text-sm text-gray-500">
+                        <span class="relative flex h-2.5 w-2.5">
+                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" v-if="status === 'running'"></span>
+                          <span class="relative inline-flex rounded-full h-2.5 w-2.5" :class="status === 'running' ? 'bg-green-500' : 'bg-gray-400'"></span>
+                        </span>
+                        {{ statusText }} | 运行时间: {{ formatDuration(uptime) }}
+                    </div>
+                </div>
+            </div>
+            <div class="flex items-center gap-6">
+                <!-- Settings Controls -->
+                <div class="flex items-center gap-4 bg-white rounded-xl px-4 py-2 shadow-sm border border-gray-100">
+                    <!-- Blur Toggle -->
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-medium text-gray-500">模糊预览</span>
+                        <button 
+                            @click="settings.blur = !settings.blur"
+                            class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
+                            :class="settings.blur ? 'bg-blue-600' : 'bg-gray-200'"
+                        >
+                            <span
+                                class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform"
+                                :class="settings.blur ? 'translate-x-5' : 'translate-x-1'"
+                            />
+                        </button>
+                    </div>
+                    
+                    <div class="w-px h-4 bg-gray-200"></div>
+                    
+                    <!-- Size Selector -->
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-medium text-gray-500">预览大小</span>
+                        <div class="flex bg-gray-100 rounded-lg p-0.5">
+                            <button 
+                                v-for="size in ['small', 'medium', 'large']" 
+                                :key="size"
+                                @click="settings.size = size"
+                                class="px-2 py-0.5 text-xs font-medium rounded-md transition-all"
+                                :class="settings.size === size ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'"
+                            >
+                                {{ size === 'small' ? '小' : size === 'medium' ? '中' : '大' }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="text-right">
+                    <div class="text-sm font-medium text-gray-500">总进度</div>
+                    <div class="text-3xl font-bold tracking-tight tabular-nums">{{ stats.progress.toFixed(1) }}%</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Stats Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <!-- Total Analyzed -->
+            <div class="stat-card p-5 flex flex-col justify-between h-32">
+                <div class="flex justify-between items-start">
+                    <span class="text-sm font-medium text-gray-500">总计已分析</span>
+                    <div class="p-2 bg-blue-50 rounded-lg text-blue-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-end gap-2">
+                    <span class="text-3xl font-bold text-gray-900 tabular-nums">{{ stats.totalAnalyzed.toLocaleString() }}</span>
+                    <span class="text-sm text-gray-400 mb-1">/ {{ stats.totalDownloaded.toLocaleString() }}</span>
+                </div>
+            </div>
+
+            <!-- Session Processed -->
+            <div class="stat-card p-5 flex flex-col justify-between h-32">
+                <div class="flex justify-between items-start">
+                    <span class="text-sm font-medium text-gray-500">本次会话处理</span>
+                    <div class="p-2 bg-purple-50 rounded-lg text-purple-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-end gap-2">
+                    <span class="text-3xl font-bold text-gray-900 tabular-nums">{{ stats.sessionProcessed.toLocaleString() }}</span>
+                    <span class="text-sm font-medium text-green-600 mb-1 bg-green-50 px-1.5 py-0.5 rounded text-xs" v-if="speed > 0">
+                        {{ speed.toFixed(1) }} 个/分
+                    </span>
+                </div>
+            </div>
+
+            <!-- Success Rate -->
+            <div class="stat-card p-5 flex flex-col justify-between h-32">
+                <div class="flex justify-between items-start">
+                    <span class="text-sm font-medium text-gray-500">成功率</span>
+                    <div class="p-2 bg-green-50 rounded-lg text-green-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-end gap-2">
+                    <span class="text-3xl font-bold text-gray-900 tabular-nums">{{ successRate }}%</span>
+                    <span class="text-sm text-gray-400 mb-1">失败: {{ stats.sessionFailed }}</span>
+                </div>
+            </div>
+
+            <!-- Remaining -->
+            <div class="stat-card p-5 flex flex-col justify-between h-32">
+                <div class="flex justify-between items-start">
+                    <span class="text-sm font-medium text-gray-500">剩余未分析</span>
+                    <div class="p-2 bg-orange-50 rounded-lg text-orange-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-end gap-2">
+                    <span class="text-3xl font-bold text-gray-900 tabular-nums">{{ stats.totalUnanalyzed.toLocaleString() }}</span>
+                    <span class="text-sm text-gray-400 mb-1" v-if="eta">预估: {{ eta }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Processing Area & Logs -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0">
+            
+            <!-- Active Workers Visualization -->
+            <div class="lg:col-span-2 flex flex-col min-h-0">
+                <div class="flex justify-between items-center mb-4 px-1">
+                    <h3 class="text-lg font-semibold text-gray-900">正在处理</h3>
+                    <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">{{ activeWorkers.length }} 个任务进行中</span>
+                </div>
+                
+                <!-- Dynamic Cards Grid -->
+                <div class="flex-1 overflow-y-auto pr-2">
+                    <transition-group name="list" tag="div" class="grid gap-6" :class="gridColsClass">
+                        <div v-for="worker in activeWorkers" :key="worker.id" class="relative group">
+                             <!-- Card Content -->
+                             <div class="aspect-[9/16] rounded-2xl overflow-hidden bg-gray-900 relative shadow-xl border border-gray-200 transform transition-all duration-500 hover:scale-[1.02] hover:shadow-2xl">
+                                <!-- Preview Image/Video -->
+                                <video v-if="worker.mediaType === 'video' && worker.preview" :src="worker.preview" autoplay muted loop playsinline class="w-full h-full object-cover opacity-90 transition-all duration-500" :class="{'blur-xl': settings.blur}"></video>
+                                <img v-else-if="worker.preview" :src="worker.preview" class="w-full h-full object-cover opacity-90 transition-all duration-500" :class="{'blur-xl': settings.blur}" />
+                                
+                                <!-- Placeholder when no preview yet -->
+                                <div v-else class="w-full h-full flex flex-col items-center justify-center bg-gray-800 text-gray-500 gap-3">
+                                   <div class="w-12 h-12 rounded-full border-2 border-gray-600 border-t-blue-500 animate-spin"></div>
+                                   <span class="text-xs font-medium">Preparing Media...</span>
+                                </div>
+
+                                <!-- Overlay Info -->
+                                <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent p-6 flex flex-col justify-end">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span class="px-2 py-0.5 rounded bg-white/20 backdrop-blur text-[10px] font-bold text-white uppercase">{{ worker.mediaType || 'UNK' }}</span>
+                                        <span class="text-white/60 text-xs font-mono">Worker #{{ worker.id }}</span>
+                                    </div>
+                                    <div class="text-white font-bold text-lg truncate leading-tight mb-1" :title="worker.item">{{ formatItemId(worker.item) }}</div>
+                                    
+                                    <div class="text-blue-400 text-xs font-bold uppercase tracking-widest flex items-center gap-2 mt-2">
+                                        <span class="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></span>
+                                        AI Analysis in Progress
+                                    </div>
+                                </div>
+                                
+                                <!-- Scanning Line Effect -->
+                                <div class="absolute inset-0 pointer-events-none overflow-hidden z-10 opacity-50">
+                                    <div class="absolute top-0 left-0 right-0 h-1/3 bg-gradient-to-b from-transparent to-blue-400/30 animate-scan"></div>
+                                </div>
+                             </div>
+                        </div>
+                        
+                        <!-- Empty State -->
+                        <div v-if="activeWorkers.length === 0" class="col-span-full flex flex-col items-center justify-center h-64 text-gray-400 border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50/50">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                            </svg>
+                            <span class="text-sm font-medium">等待任务分配...</span>
+                        </div>
+                    </transition-group>
+                </div>
+            </div>
+
+            <!-- Right Column: Logs -->
+            <div class="glass-panel rounded-2xl p-0 flex flex-col min-h-0 overflow-hidden h-full">
+                <div class="p-4 border-b border-gray-100 bg-white/50 flex justify-between items-center">
+                    <h3 class="font-semibold text-gray-900">实时日志</h3>
+                    <span class="text-xs text-gray-400">Latest {{ logs.length }} lines</span>
+                </div>
+                <div class="flex-1 overflow-y-auto p-4 bg-[#1e1e1e] text-gray-300 text-xs leading-relaxed log-container scroll-smooth" ref="logContainer">
+                    <div v-for="(log, index) in logs" :key="index" class="mb-1.5 font-mono break-all border-l-2 pl-2" :class="getLogBorderClass(log.message)">
+                        <span class="text-gray-500 opacity-50 mr-2">[{{ log.time.split(' ')[0] }}]</span>
+                        <span :class="{
+                            'text-blue-300 font-medium': log.message.includes('开始'),
+                            'text-emerald-400 font-bold': log.message.includes('完成') || log.message.includes('成功') || log.message.includes('✓') || log.message.includes('✅'),
+                            'text-amber-400': log.message.includes('跳过') || log.message.includes('⚠'),
+                            'text-rose-400 font-bold': log.message.includes('失败') || log.message.includes('错误') || log.message.includes('❌'),
+                            'text-purple-300': log.message.includes('Worker'),
+                            'text-gray-300': true
+                        }">{{ cleanMessage(log.message) }}</span>
+                    </div>
+                    <div v-if="logs.length === 0" class="text-gray-600 italic text-center mt-10">等待日志数据...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, onUnmounted, nextTick, watch } = Vue;
+
+        createApp({
+            setup() {
+                const status = ref('idle');
+                const uptime = ref(0);
+                const stats = ref({
+                    totalDownloaded: 0,
+                    totalAnalyzed: 0,
+                    totalUnanalyzed: 0,
+                    progress: 0,
+                    sessionProcessed: 0,
+                    sessionSuccess: 0,
+                    sessionFailed: 0,
+                    sessionSkipped: 0,
+                    sessionVideo: 0,
+                    sessionImage: 0
+                });
+                const workers = ref([]);
+                const logs = ref([]);
+                const logContainer = ref(null);
+                const settings = ref({
+                    blur: false,
+                    size: 'medium' // small, medium, large
+                });
+                
+                const POLL_INTERVAL = 1000; // Faster polling for smoother UI
+                let pollTimer = null;
+
+                // Computed
+                const gridColsClass = computed(() => {
+                    switch (settings.value.size) {
+                        case 'small': return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4';
+                        case 'large': return 'grid-cols-1';
+                        default: return 'grid-cols-1 sm:grid-cols-2'; // medium
+                    }
+                });
+
+                const statusText = computed(() => {
+                    const map = {
+                        'running': '正在运行',
+                        'idle': '空闲',
+                        'stopped': '已停止'
+                    };
+                    return map[status.value] || status.value;
+                });
+
+                const activeWorkers = computed(() => {
+                    return workers.value.filter(w => w.status === 'processing' && w.item);
+                });
+
+                const successRate = computed(() => {
+                    if (stats.value.sessionProcessed === 0) return 100;
+                    return ((stats.value.sessionSuccess / stats.value.sessionProcessed) * 100).toFixed(1);
+                });
+
+                const speed = computed(() => {
+                    if (uptime.value < 60) return stats.value.sessionProcessed; 
+                    return stats.value.sessionProcessed / (uptime.value / 60);
+                });
+
+                const eta = computed(() => {
+                    if (speed.value <= 0) return null;
+                    const remaining = stats.value.totalUnanalyzed;
+                    const minutesLeft = remaining / speed.value;
+                    
+                    if (minutesLeft < 60) return `${Math.ceil(minutesLeft)} 分钟`;
+                    const hours = Math.floor(minutesLeft / 60);
+                    const mins = Math.ceil(minutesLeft % 60);
+                    return `${hours} 小时 ${mins} 分钟`;
+                });
+
+                // Methods
+                const formatDuration = (seconds) => {
+                    const h = Math.floor(seconds / 3600);
+                    const m = Math.floor((seconds % 3600) / 60);
+                    const s = Math.floor(seconds % 60);
+                    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                };
+                
+                const formatItemId = (id) => {
+                    if (!id) return 'Unknown';
+                    // If id looks like a file path, take the basename and remove extension
+                    if (id.includes('/')) {
+                        const parts = id.split('/');
+                        let name = parts[parts.length - 1];
+                        return name.split('.')[0];
+                    }
+                    return id;
+                };
+                
+                const cleanMessage = (msg) => {
+                    return msg.replace(/\[Worker \d+\] /, '');
+                };
+                
+                const getLogBorderClass = (msg) => {
+                    if (msg.includes('✅') || msg.includes('成功')) return 'border-emerald-500/50';
+                    if (msg.includes('❌') || msg.includes('失败')) return 'border-rose-500/50';
+                    if (msg.includes('⚠') || msg.includes('跳过')) return 'border-amber-500/50';
+                    return 'border-transparent';
+                };
+
+                const fetchData = async () => {
+                    try {
+                        const res = await fetch('/api/stats');
+                        if (!res.ok) throw new Error('Network response was not ok');
+                        const data = await res.json();
+                        
+                        status.value = data.status;
+                        uptime.value = data.uptime;
+                        stats.value = { ...stats.value, ...data.stats };
+                        
+                        // Update workers with slight delay for smoother transitions if needed
+                        workers.value = data.workers;
+                        
+                        if (data.logs && data.logs.length > 0) {
+                            const isAtBottom = logContainer.value && (logContainer.value.scrollHeight - logContainer.value.scrollTop <= logContainer.value.clientHeight + 50);
+                            
+                            logs.value = data.logs;
+                            
+                            if (isAtBottom) {
+                                nextTick(() => {
+                                    if (logContainer.value) {
+                                        logContainer.value.scrollTop = logContainer.value.scrollHeight;
+                                    }
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Fetch error:', error);
+                    }
+                };
+
+                onMounted(() => {
+                    fetchData();
+                    pollTimer = setInterval(fetchData, POLL_INTERVAL);
+                });
+
+                onUnmounted(() => {
+                    if (pollTimer) clearInterval(pollTimer);
+                });
+
+                return {
+                    status,
+                    statusText,
+                    uptime,
+                    stats,
+                    workers,
+                    activeWorkers,
+                    logs,
+                    successRate,
+                    speed,
+                    eta,
+                    formatDuration,
+                    formatItemId,
+                    cleanMessage,
+                    getLogBorderClass,
+                    logContainer,
+                    settings,
+                    gridColsClass
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
