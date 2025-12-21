@@ -256,6 +256,23 @@ class WebUIServer {
       }
     });
 
+    // API: 获取最新下载的视频
+    this.app.get('/api/videos/latest', async (req, res) => {
+      try {
+        const limit = parseInt(req.query.limit) || 10;
+        const latestVideos = await db.getLatestDownloadedVideos(limit);
+        const videosWithUrls = await this.processVideosForResponse(latestVideos);
+        
+        res.json({
+            success: true,
+            data: videosWithUrls
+        });
+      } catch (error) {
+        console.error('API Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
     // 偏好选择页面
     this.app.get('/preference', async (req, res) => {
       try {

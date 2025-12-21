@@ -590,6 +590,32 @@ class MySQLDatabase {
   }
 
   /**
+   * 获取最新下载的视频列表
+   */
+  async getLatestDownloadedVideos(limit = 10) {
+    const [rows] = await this.pool.execute(
+      `SELECT ds.*, vf.ai_features, vf.video_path 
+       FROM download_status ds
+       LEFT JOIN video_features vf ON ds.aweme_id = vf.aweme_id
+       WHERE ds.status = 'completed'
+       ORDER BY ds.updated_at DESC
+       LIMIT ?`,
+      [limit]
+    );
+    
+    rows.forEach(row => {
+      if (row.ai_features) {
+        try {
+          row.ai_features = JSON.parse(row.ai_features);
+        } catch (e) {
+          row.ai_features = {};
+        }
+      }
+    });
+    return rows || [];
+  }
+
+  /**
    * 创建或更新每日总结
    */
   async saveDailySummary(date, summaryContent, videoCount, webuiToken) {
