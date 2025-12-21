@@ -153,6 +153,60 @@ class MySQLDatabase {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `);
 
+      // 创建下载任务表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS download_jobs (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          job_id VARCHAR(64) NOT NULL UNIQUE,
+          aweme_id VARCHAR(64),
+          user_id VARCHAR(64),
+          user_name VARCHAR(255),
+          status VARCHAR(32) DEFAULT 'pending',
+          download_url TEXT,
+          error_message TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_job_id (job_id),
+          INDEX idx_status (status),
+          INDEX idx_aweme_id (aweme_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
+      // 创建用户token表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS user_tokens (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          token VARCHAR(128) NOT NULL UNIQUE,
+          user_name VARCHAR(255),
+          last_download_timestamp BIGINT DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_token (token),
+          INDEX idx_last_download (last_download_timestamp)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
+      // 创建批量下载任务表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS batch_download_jobs (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          job_id VARCHAR(64) NOT NULL UNIQUE,
+          token VARCHAR(128) NOT NULL,
+          aweme_ids TEXT,
+          total_count INT DEFAULT 0,
+          completed_count INT DEFAULT 0,
+          failed_count INT DEFAULT 0,
+          status VARCHAR(32) DEFAULT 'pending',
+          download_urls TEXT,
+          error_message TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_job_id (job_id),
+          INDEX idx_token (token),
+          INDEX idx_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
       await connection.commit();
     } catch (err) {
       await connection.rollback();
@@ -174,6 +228,43 @@ class MySQLDatabase {
         console.log('检测到 video_features 表缺少 media_type 列，正在添加...');
         await this.pool.query("ALTER TABLE video_features ADD COLUMN media_type VARCHAR(32) DEFAULT 'video'");
         console.log('成功添加 media_type 列到 video_features 表');
+      }
+
+      // 检查 download_status 表是否有 video_info 列
+      const [videoInfoColumns] = await this.pool.query("SHOW COLUMNS FROM download_status LIKE 'video_info'");
+      
+      if (videoInfoColumns.length === 0) {
+        console.log('检测到 download_status 表缺少 video_info 列，正在添加...');
+        await this.pool.query("ALTER TABLE download_status ADD COLUMN video_info LONGTEXT");
+        console.log('成功添加 video_info 列到 download_status 表');
+      }
+
+      // 检查 download_status 表是否有常用字段列（如果缺少则添加）
+      const commonFields = [
+        { name: 'title', type: 'VARCHAR(512)' },
+        { name: 'description', type: 'TEXT' },
+        { name: 'author_nickname', type: 'VARCHAR(255)' },
+        { name: 'author_unique_id', type: 'VARCHAR(255)' },
+        { name: 'digg_count', type: 'INT DEFAULT 0' },
+        { name: 'comment_count', type: 'INT DEFAULT 0' },
+        { name: 'share_count', type: 'INT DEFAULT 0' },
+        { name: 'collect_count', type: 'INT DEFAULT 0' },
+        { name: 'create_time', type: 'BIGINT' },
+        { name: 'duration', type: 'INT' },
+        { name: 'video_width', type: 'INT' },
+        { name: 'video_height', type: 'INT' },
+        { name: 'music_title', type: 'VARCHAR(255)' },
+        { name: 'music_author', type: 'VARCHAR(255)' },
+        { name: 'poi_name', type: 'VARCHAR(255)' }
+      ];
+
+      for (const field of commonFields) {
+        const [fieldColumns] = await this.pool.query(`SHOW COLUMNS FROM download_status LIKE '${field.name}'`);
+        if (fieldColumns.length === 0) {
+          console.log(`检测到 download_status 表缺少 ${field.name} 列，正在添加...`);
+          await this.pool.query(`ALTER TABLE download_status ADD COLUMN ${field.name} ${field.type}`);
+          console.log(`成功添加 ${field.name} 列到 download_status 表`);
+        }
       }
     } catch (err) {
       console.error('检查/迁移数据库列失败:', err.message);
@@ -590,6 +681,32 @@ class MySQLDatabase {
   }
 
   /**
+   * 获取最新下载的视频列表
+   */
+  async getLatestDownloadedVideos(limit = 10) {
+    const [rows] = await this.pool.execute(
+      `SELECT ds.*, vf.ai_features, vf.video_path 
+       FROM download_status ds
+       LEFT JOIN video_features vf ON ds.aweme_id = vf.aweme_id
+       WHERE ds.status = 'completed'
+       ORDER BY ds.updated_at DESC
+       LIMIT ?`,
+      [limit]
+    );
+    
+    rows.forEach(row => {
+      if (row.ai_features) {
+        try {
+          row.ai_features = JSON.parse(row.ai_features);
+        } catch (e) {
+          row.ai_features = {};
+        }
+      }
+    });
+    return rows || [];
+  }
+
+  /**
    * 创建或更新每日总结
    */
   async saveDailySummary(date, summaryContent, videoCount, webuiToken) {
@@ -729,6 +846,267 @@ class MySQLDatabase {
       console.error('计算推荐分数失败:', error);
       throw error;
     }
+  }
+
+  // ========== 下载任务相关方法 ==========
+
+  /**
+   * 创建下载任务
+   * @param {string} jobId - 任务ID
+   * @param {string} awemeId - 作品ID
+   * @param {string} userId - 用户ID
+   * @param {string} userName - 用户名
+   * @param {string} downloadUrl - 下载URL
+   */
+  async createDownloadJob(jobId, awemeId, userId, userName, downloadUrl = null) {
+    await this.pool.execute(
+      `INSERT INTO download_jobs (job_id, aweme_id, user_id, user_name, status, download_url)
+       VALUES (?, ?, ?, ?, 'pending', ?)`,
+      [jobId, awemeId, userId, userName, downloadUrl]
+    );
+  }
+
+  /**
+   * 获取下载任务
+   * @param {string} jobId - 任务ID
+   */
+  async getDownloadJob(jobId) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM download_jobs WHERE job_id = ?`,
+      [jobId]
+    );
+    return rows[0] || null;
+  }
+
+  /**
+   * 更新下载任务状态
+   * @param {string} jobId - 任务ID
+   * @param {string} status - 状态 (pending, processing, completed, failed)
+   * @param {string} downloadUrl - 下载直链（可选）
+   * @param {string} errorMessage - 错误信息（可选）
+   */
+  async updateDownloadJobStatus(jobId, status, downloadUrl = null, errorMessage = null) {
+    const updates = ['status = ?'];
+    const params = [status];
+
+    if (downloadUrl !== null) {
+      updates.push('download_url = ?');
+      params.push(downloadUrl);
+    }
+
+    if (errorMessage !== null) {
+      updates.push('error_message = ?');
+      params.push(errorMessage);
+    }
+
+    params.push(jobId);
+
+    await this.pool.execute(
+      `UPDATE download_jobs SET ${updates.join(', ')}, updated_at = NOW() WHERE job_id = ?`,
+      params
+    );
+  }
+
+  /**
+   * 获取待处理的下载任务
+   */
+  async getPendingDownloadJobs(limit = 10) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM download_jobs 
+       WHERE status = 'pending' 
+       ORDER BY created_at ASC 
+       LIMIT ?`,
+      [limit]
+    );
+    return rows || [];
+  }
+
+  // ========== 用户Token相关方法 ==========
+
+  /**
+   * 创建或更新用户token
+   * @param {string} token - Token字符串
+   * @param {string} userName - 用户名（可选）
+   */
+  async createOrUpdateUserToken(token, userName = null) {
+    await this.pool.execute(
+      `INSERT INTO user_tokens (token, user_name, last_download_timestamp)
+       VALUES (?, ?, 0)
+       ON DUPLICATE KEY UPDATE
+       user_name = IFNULL(?, user_name),
+       updated_at = NOW()`,
+      [token, userName, userName]
+    );
+  }
+
+  /**
+   * 获取用户token信息
+   * @param {string} token - Token字符串
+   */
+  async getUserToken(token) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM user_tokens WHERE token = ?`,
+      [token]
+    );
+    return rows[0] || null;
+  }
+
+  /**
+   * 更新用户最后下载时间戳
+   * @param {string} token - Token字符串
+   * @param {number} timestamp - 时间戳
+   */
+  async updateLastDownloadTimestamp(token, timestamp) {
+    await this.pool.execute(
+      `UPDATE user_tokens 
+       SET last_download_timestamp = ?, updated_at = NOW()
+       WHERE token = ?`,
+      [timestamp, token]
+    );
+  }
+
+  /**
+   * 获取token用户需要下载的新视频（基于timestamp）
+   * @param {string} token - Token字符串
+   * @param {number} limit - 限制数量
+   * @param {boolean} includeCompleted - 是否包含已完成的视频（默认false，只返回未下载的）
+   */
+  async getNewVideosForToken(token, limit = 100, includeCompleted = false) {
+    const tokenInfo = await this.getUserToken(token);
+    if (!tokenInfo) {
+      return [];
+    }
+
+    const lastTimestamp = tokenInfo.last_download_timestamp || 0;
+
+    let statusCondition = "ds.status = 'pending'";
+    if (includeCompleted) {
+      statusCondition = "ds.status IN ('pending', 'completed')";
+    }
+
+    const [rows] = await this.pool.execute(
+      `SELECT ds.*, 
+              CASE WHEN ds.video_info IS NOT NULL THEN 1 ELSE 0 END as has_video_info
+       FROM download_status ds
+       WHERE ds.create_time > ?
+       AND ${statusCondition}
+       ORDER BY ds.create_time ASC
+       LIMIT ?`,
+      [lastTimestamp, limit]
+    );
+
+    return rows || [];
+  }
+
+  // ========== 批量下载任务相关方法 ==========
+
+  /**
+   * 创建批量下载任务
+   * @param {string} jobId - 任务ID
+   * @param {string} token - Token
+   * @param {array} awemeIds - 作品ID列表
+   */
+  async createBatchDownloadJob(jobId, token, awemeIds) {
+    const awemeIdsJson = JSON.stringify(awemeIds);
+    await this.pool.execute(
+      `INSERT INTO batch_download_jobs (job_id, token, aweme_ids, total_count, status)
+       VALUES (?, ?, ?, ?, 'pending')`,
+      [jobId, token, awemeIdsJson, awemeIds.length]
+    );
+  }
+
+  /**
+   * 获取批量下载任务
+   * @param {string} jobId - 任务ID
+   */
+  async getBatchDownloadJob(jobId) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM batch_download_jobs WHERE job_id = ?`,
+      [jobId]
+    );
+    const row = rows[0];
+    if (row && row.aweme_ids) {
+      try {
+        row.aweme_ids = JSON.parse(row.aweme_ids);
+      } catch (e) {
+        row.aweme_ids = [];
+      }
+    }
+    if (row && row.download_urls) {
+      try {
+        row.download_urls = JSON.parse(row.download_urls);
+      } catch (e) {
+        row.download_urls = [];
+      }
+    }
+    return row || null;
+  }
+
+  /**
+   * 更新批量下载任务状态
+   * @param {string} jobId - 任务ID
+   * @param {string} status - 状态
+   * @param {number} completedCount - 完成数量
+   * @param {number} failedCount - 失败数量
+   * @param {array} downloadUrls - 下载链接列表
+   * @param {string} errorMessage - 错误信息
+   */
+  async updateBatchDownloadJobStatus(jobId, status, completedCount = null, failedCount = null, downloadUrls = null, errorMessage = null) {
+    const updates = ['status = ?'];
+    const params = [status];
+
+    if (completedCount !== null) {
+      updates.push('completed_count = ?');
+      params.push(completedCount);
+    }
+
+    if (failedCount !== null) {
+      updates.push('failed_count = ?');
+      params.push(failedCount);
+    }
+
+    if (downloadUrls !== null) {
+      updates.push('download_urls = ?');
+      params.push(JSON.stringify(downloadUrls));
+    }
+
+    if (errorMessage !== null) {
+      updates.push('error_message = ?');
+      params.push(errorMessage);
+    }
+
+    params.push(jobId);
+
+    await this.pool.execute(
+      `UPDATE batch_download_jobs SET ${updates.join(', ')}, updated_at = NOW() WHERE job_id = ?`,
+      params
+    );
+  }
+
+  /**
+   * 获取待处理的批量下载任务
+   */
+  async getPendingBatchDownloadJobs(limit = 5) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM batch_download_jobs 
+       WHERE status = 'pending' 
+       ORDER BY created_at ASC 
+       LIMIT ?`,
+      [limit]
+    );
+    
+    // 解析JSON字段
+    rows.forEach(row => {
+      if (row.aweme_ids) {
+        try {
+          row.aweme_ids = JSON.parse(row.aweme_ids);
+        } catch (e) {
+          row.aweme_ids = [];
+        }
+      }
+    });
+    
+    return rows || [];
   }
 }
 

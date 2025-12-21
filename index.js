@@ -6,6 +6,7 @@ const db = require('./src/db');
 const videoProcessor = require('./src/videoProcessor');
 const aiScheduler = require('./src/aiScheduler');
 const WebUIServer = require('./src/webui-server');
+const downloadTaskProcessor = require('./src/downloadTaskProcessor');
 require('dotenv').config();
 
 /**
@@ -36,6 +37,10 @@ async function initializeApp() {
     // 加载配置
     await monitorService.loadConfig();
     
+    // 启动下载任务处理器
+    downloadTaskProcessor.start();
+    console.log('下载任务处理器已启动');
+
     // 启动AI功能（如果启用）
     const enableAI = process.env.ENABLE_AI === 'true';
     if (enableAI) {
@@ -70,6 +75,7 @@ async function initializeApp() {
     process.on('SIGINT', () => {
       console.log('\n接收到中断信号，正在停止服务...');
       monitorService.stop();
+      downloadTaskProcessor.stop();
       if (enableAI) {
         aiScheduler.stop();
       }
@@ -79,6 +85,7 @@ async function initializeApp() {
     process.on('SIGTERM', () => {
       console.log('\n接收到终止信号，正在停止服务...');
       monitorService.stop();
+      downloadTaskProcessor.stop();
       if (enableAI) {
         aiScheduler.stop();
       }
