@@ -5,6 +5,7 @@ const preferenceService = require('./preferenceService');
 const summaryService = require('./summaryService');
 const videoProcessor = require('./videoProcessor');
 const aiAnalyzer = require('./aiAnalyzer');
+const tokenAuth = require('./tokenAuth');
 require('dotenv').config();
 
 /**
@@ -586,6 +587,189 @@ class WebUIServer {
         res.json(response);
       } catch (error) {
         console.error('查询下载任务状态失败:', error.message);
+        res.status(500).json({ success: false, error: '服务器错误: ' + error.message });
+      }
+    });
+
+    // ========== 基于Token的下载API ==========
+
+    // 检查新视频（需要token认证）
+    this.app.post('/api/videos/check-new', tokenAuth.verifyToken.bind(tokenAuth), async (req, res) => {
+      try {
+        const { limit = 100, include_completed = false } = req.body;
+        const token = req.token;
+
+        // 获取该token用户需要下载的新视频
+        const newVideos = await db.getNewVideosForToken(token, limit, include_completed);
+
+        // 格式化返回数据
+        const videos = newVideos.map(video => ({
+          aweme_id: video.aweme_id,
+          user_id: video.user_id,
+          user_name: video.user_name,
+          title: video.title,
+          description: video.description,
+          create_time: video.create_time,
+          has_video_info: video.has_video_info === 1,
+          status: video.status
+        }));
+
+        res.json({
+          success: true,
+          count: videos.length,
+          last_download_timestamp: req.tokenInfo.last_download_timestamp || 0,
+          videos: videos
+        });
+      } catch (error) {
+        console.error('检查新视频失败:', error.message);
+        res.status(500).json({ success: false, error: '服务器错误: ' + error.message });
+      }
+    });
+
+    // 批量下载视频（需要token认证）
+    this.app.post('/api/videos/download-batch', tokenAuth.verifyToken.bind(tokenAuth), async (req, res) => {
+      try {
+        const { aweme_ids } = req.body;
+        const token = req.token;
+
+        if (!aweme_ids || !Array.isArray(aweme_ids) || aweme_ids.length === 0) {
+          return res.status(400).json({ success: false, error: '缺少必要参数：aweme_ids（数组）' });
+        }
+
+        // 生成唯一的job_id
+        const crypto = require('crypto');
+        const jobId = crypto.randomBytes(16).toString('hex');
+
+        // 创建批量下载任务
+        await db.createBatchDownloadJob(jobId, token, aweme_ids);
+
+        // 触发批量下载任务处理（异步）
+        const downloadTaskProcessor = require('./downloadTaskProcessor');
+        downloadTaskProcessor.processBatchJob(jobId).catch(err => {
+          console.error(`处理批量下载任务失败 (${jobId}):`, err.message);
+        });
+
+        res.json({
+          success: true,
+          job_id: jobId,
+          total_count: aweme_ids.length,
+          message: '批量下载任务已创建'
+        });
+      } catch (error) {
+        console.error('创建批量下载任务失败:', error.message);
+        res.status(500).json({ success: false, error: '服务器错误: ' + error.message });
+      }
+    });
+
+    // 查询批量下载任务状态
+    this.app.get('/api/videos/download-batch/:jobid', tokenAuth.optionalVerifyToken.bind(tokenAuth), async (req, res) => {
+      try {
+        const { jobid } = req.params;
+
+        const job = await db.getBatchDownloadJob(jobid);
+        if (!job) {
+          return res.status(404).json({ success: false, error: '未找到批量下载任务' });
+        }
+
+        // 如果提供了token，验证是否是任务所有者
+        if (req.token && job.token !== req.token) {
+          return res.status(403).json({ success: false, error: '无权访问此任务' });
+        }
+
+        const response = {
+          success: true,
+          job_id: job.job_id,
+          status: job.status,
+          total_count: job.total_count,
+          completed_count: job.completed_count || 0,
+          failed_count: job.failed_count || 0,
+          created_at: job.created_at,
+          updated_at: job.updated_at
+        };
+
+        // 如果下载完成，返回下载链接列表
+        if (job.status === 'completed' && job.download_urls && job.download_urls.length > 0) {
+          response.download_urls = job.download_urls;
+        }
+
+        // 如果失败，返回错误信息
+        if (job.status === 'failed' && job.error_message) {
+          response.error_message = job.error_message;
+        }
+
+        res.json(response);
+      } catch (error) {
+        console.error('查询批量下载任务状态失败:', error.message);
+        res.status(500).json({ success: false, error: '服务器错误: ' + error.message });
+      }
+    });
+
+    // ========== Token管理API ==========
+
+    // 创建或获取token
+    this.app.post('/api/tokens', async (req, res) => {
+      try {
+        const { token, user_name } = req.body;
+
+        if (!token) {
+          // 如果没有提供token，自动生成一个
+          const crypto = require('crypto');
+          const generatedToken = crypto.randomBytes(32).toString('hex');
+          await db.createOrUpdateUserToken(generatedToken, user_name);
+          const tokenInfo = await db.getUserToken(generatedToken);
+
+          return res.json({
+            success: true,
+            token: generatedToken,
+            token_info: {
+              user_name: tokenInfo.user_name,
+              last_download_timestamp: tokenInfo.last_download_timestamp,
+              created_at: tokenInfo.created_at
+            },
+            message: 'Token已自动生成'
+          });
+        }
+
+        // 如果提供了token，创建或更新
+        await db.createOrUpdateUserToken(token, user_name);
+        const tokenInfo = await db.getUserToken(token);
+
+        res.json({
+          success: true,
+          token: token,
+          token_info: {
+            user_name: tokenInfo.user_name,
+            last_download_timestamp: tokenInfo.last_download_timestamp,
+            created_at: tokenInfo.created_at
+          },
+          message: 'Token已创建或更新'
+        });
+      } catch (error) {
+        console.error('创建Token失败:', error.message);
+        res.status(500).json({ success: false, error: '服务器错误: ' + error.message });
+      }
+    });
+
+    // 查询token信息
+    this.app.get('/api/tokens/:token', async (req, res) => {
+      try {
+        const { token } = req.params;
+
+        const tokenInfo = await db.getUserToken(token);
+        if (!tokenInfo) {
+          return res.status(404).json({ success: false, error: 'Token不存在' });
+        }
+
+        res.json({
+          success: true,
+          token: tokenInfo.token,
+          user_name: tokenInfo.user_name,
+          last_download_timestamp: tokenInfo.last_download_timestamp,
+          created_at: tokenInfo.created_at,
+          updated_at: tokenInfo.updated_at
+        });
+      } catch (error) {
+        console.error('查询Token信息失败:', error.message);
         res.status(500).json({ success: false, error: '服务器错误: ' + error.message });
       }
     });
