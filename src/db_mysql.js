@@ -153,6 +153,25 @@ class MySQLDatabase {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `);
 
+      // 创建下载任务表
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS download_jobs (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          job_id VARCHAR(64) NOT NULL UNIQUE,
+          aweme_id VARCHAR(64),
+          user_id VARCHAR(64),
+          user_name VARCHAR(255),
+          status VARCHAR(32) DEFAULT 'pending',
+          download_url TEXT,
+          error_message TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_job_id (job_id),
+          INDEX idx_status (status),
+          INDEX idx_aweme_id (aweme_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+
       await connection.commit();
     } catch (err) {
       await connection.rollback();
@@ -174,6 +193,43 @@ class MySQLDatabase {
         console.log('检测到 video_features 表缺少 media_type 列，正在添加...');
         await this.pool.query("ALTER TABLE video_features ADD COLUMN media_type VARCHAR(32) DEFAULT 'video'");
         console.log('成功添加 media_type 列到 video_features 表');
+      }
+
+      // 检查 download_status 表是否有 video_info 列
+      const [videoInfoColumns] = await this.pool.query("SHOW COLUMNS FROM download_status LIKE 'video_info'");
+      
+      if (videoInfoColumns.length === 0) {
+        console.log('检测到 download_status 表缺少 video_info 列，正在添加...');
+        await this.pool.query("ALTER TABLE download_status ADD COLUMN video_info LONGTEXT");
+        console.log('成功添加 video_info 列到 download_status 表');
+      }
+
+      // 检查 download_status 表是否有常用字段列（如果缺少则添加）
+      const commonFields = [
+        { name: 'title', type: 'VARCHAR(512)' },
+        { name: 'description', type: 'TEXT' },
+        { name: 'author_nickname', type: 'VARCHAR(255)' },
+        { name: 'author_unique_id', type: 'VARCHAR(255)' },
+        { name: 'digg_count', type: 'INT DEFAULT 0' },
+        { name: 'comment_count', type: 'INT DEFAULT 0' },
+        { name: 'share_count', type: 'INT DEFAULT 0' },
+        { name: 'collect_count', type: 'INT DEFAULT 0' },
+        { name: 'create_time', type: 'BIGINT' },
+        { name: 'duration', type: 'INT' },
+        { name: 'video_width', type: 'INT' },
+        { name: 'video_height', type: 'INT' },
+        { name: 'music_title', type: 'VARCHAR(255)' },
+        { name: 'music_author', type: 'VARCHAR(255)' },
+        { name: 'poi_name', type: 'VARCHAR(255)' }
+      ];
+
+      for (const field of commonFields) {
+        const [fieldColumns] = await this.pool.query(`SHOW COLUMNS FROM download_status LIKE '${field.name}'`);
+        if (fieldColumns.length === 0) {
+          console.log(`检测到 download_status 表缺少 ${field.name} 列，正在添加...`);
+          await this.pool.query(`ALTER TABLE download_status ADD COLUMN ${field.name} ${field.type}`);
+          console.log(`成功添加 ${field.name} 列到 download_status 表`);
+        }
       }
     } catch (err) {
       console.error('检查/迁移数据库列失败:', err.message);
@@ -755,6 +811,79 @@ class MySQLDatabase {
       console.error('计算推荐分数失败:', error);
       throw error;
     }
+  }
+
+  // ========== 下载任务相关方法 ==========
+
+  /**
+   * 创建下载任务
+   * @param {string} jobId - 任务ID
+   * @param {string} awemeId - 作品ID
+   * @param {string} userId - 用户ID
+   * @param {string} userName - 用户名
+   * @param {string} downloadUrl - 下载URL
+   */
+  async createDownloadJob(jobId, awemeId, userId, userName, downloadUrl = null) {
+    await this.pool.execute(
+      `INSERT INTO download_jobs (job_id, aweme_id, user_id, user_name, status, download_url)
+       VALUES (?, ?, ?, ?, 'pending', ?)`,
+      [jobId, awemeId, userId, userName, downloadUrl]
+    );
+  }
+
+  /**
+   * 获取下载任务
+   * @param {string} jobId - 任务ID
+   */
+  async getDownloadJob(jobId) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM download_jobs WHERE job_id = ?`,
+      [jobId]
+    );
+    return rows[0] || null;
+  }
+
+  /**
+   * 更新下载任务状态
+   * @param {string} jobId - 任务ID
+   * @param {string} status - 状态 (pending, processing, completed, failed)
+   * @param {string} downloadUrl - 下载直链（可选）
+   * @param {string} errorMessage - 错误信息（可选）
+   */
+  async updateDownloadJobStatus(jobId, status, downloadUrl = null, errorMessage = null) {
+    const updates = ['status = ?'];
+    const params = [status];
+
+    if (downloadUrl !== null) {
+      updates.push('download_url = ?');
+      params.push(downloadUrl);
+    }
+
+    if (errorMessage !== null) {
+      updates.push('error_message = ?');
+      params.push(errorMessage);
+    }
+
+    params.push(jobId);
+
+    await this.pool.execute(
+      `UPDATE download_jobs SET ${updates.join(', ')}, updated_at = NOW() WHERE job_id = ?`,
+      params
+    );
+  }
+
+  /**
+   * 获取待处理的下载任务
+   */
+  async getPendingDownloadJobs(limit = 10) {
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM download_jobs 
+       WHERE status = 'pending' 
+       ORDER BY created_at ASC 
+       LIMIT ?`,
+      [limit]
+    );
+    return rows || [];
   }
 }
 

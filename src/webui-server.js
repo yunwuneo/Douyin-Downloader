@@ -503,6 +503,92 @@ class WebUIServer {
         res.status(500).json({ success: false, error: '服务器错误' });
       }
     });
+
+    // 创建下载任务
+    this.app.post('/api/download', async (req, res) => {
+      try {
+        const { aweme_id, user_id, user_name, download_url } = req.body;
+
+        if (!aweme_id) {
+          return res.status(400).json({ success: false, error: '缺少必要参数：aweme_id' });
+        }
+
+        // 生成唯一的job_id
+        const crypto = require('crypto');
+        const jobId = crypto.randomBytes(16).toString('hex');
+
+        // 获取用户信息（如果未提供）
+        let userId = user_id;
+        let userName = user_name;
+
+        if (!userId || !userName) {
+          // 尝试从数据库获取
+          const videoInfo = await db.getDownloadStatus(aweme_id);
+          if (videoInfo) {
+            userId = userId || videoInfo.user_id;
+            userName = userName || videoInfo.user_name;
+          }
+        }
+
+        // 创建下载任务
+        await db.createDownloadJob(jobId, aweme_id, userId || 'unknown', userName || 'unknown', download_url || null);
+
+        // 如果提供了download_url，直接标记为completed
+        if (download_url) {
+          await db.updateDownloadJobStatus(jobId, 'completed', download_url);
+        } else {
+          // 触发下载任务处理（异步）
+          const downloadTaskProcessor = require('./downloadTaskProcessor');
+          downloadTaskProcessor.processJob(jobId).catch(err => {
+            console.error(`处理下载任务失败 (${jobId}):`, err.message);
+          });
+        }
+
+        res.json({
+          success: true,
+          job_id: jobId,
+          message: '下载任务已创建'
+        });
+      } catch (error) {
+        console.error('创建下载任务失败:', error.message);
+        res.status(500).json({ success: false, error: '服务器错误: ' + error.message });
+      }
+    });
+
+    // 查询下载任务状态
+    this.app.get('/api/download/:jobid', async (req, res) => {
+      try {
+        const { jobid } = req.params;
+
+        const job = await db.getDownloadJob(jobid);
+        if (!job) {
+          return res.status(404).json({ success: false, error: '未找到下载任务' });
+        }
+
+        const response = {
+          success: true,
+          job_id: job.job_id,
+          status: job.status,
+          created_at: job.created_at,
+          updated_at: job.updated_at
+        };
+
+        // 如果下载完成，返回下载直链
+        if (job.status === 'completed' && job.download_url) {
+          response.download_url = job.download_url;
+        }
+
+        // 如果失败，返回错误信息
+        if (job.status === 'failed' && job.error_message) {
+          response.error_message = job.error_message;
+        }
+
+        res.json(response);
+      } catch (error) {
+        console.error('查询下载任务状态失败:', error.message);
+        res.status(500).json({ success: false, error: '服务器错误: ' + error.message });
+      }
+    });
   }
 
   /**
@@ -913,8 +999,11 @@ class WebUIServer {
 // 如果直接运行此文件，启动服务器
 if (require.main === module) {
   const db = require('./db');
+  const downloadTaskProcessor = require('./downloadTaskProcessor');
   const app = async () => {
     await db.init();
+    // 启动下载任务处理器
+    downloadTaskProcessor.start();
     const server = new WebUIServer();
     server.start();
   };
